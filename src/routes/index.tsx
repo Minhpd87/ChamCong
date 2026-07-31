@@ -43,6 +43,7 @@ function App() {
   const [employeesLoading, setEmployeesLoading] = useState(true)
   const [employeesError, setEmployeesError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [manualEmployeeId, setManualEmployeeId] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const [faceInfo, setFaceInfo] = useState<FaceInfoResponse | null>(null)
   const [faceLoading, setFaceLoading] = useState(false)
@@ -389,10 +390,7 @@ function App() {
 
           <div className="grid gap-3 sm:grid-cols-3">
             <StatCard label="Nhân viên" value={String(employees.length)} />
-            <StatCard
-              label="Đã chọn"
-              value={selectedEmployee ? selectedEmployee.ma_nv : 'Chưa có'}
-            />
+            <StatCard label="Đã chọn" value={selectedEmployeeId || 'Chưa có'} />
             <StatCard
               label="Trạng thái"
               value={employeesLoading ? 'Đang tải' : 'Sẵn sàng'}
@@ -430,6 +428,7 @@ function App() {
                   type="button"
                   onClick={() => {
                     setSearchTerm('')
+                    setManualEmployeeId('')
                     setSelectedEmployeeId('')
                   }}
                   aria-label="Xóa từ khóa tìm kiếm"
@@ -454,6 +453,66 @@ function App() {
             </div>
           </label>
 
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              const trimmed = manualEmployeeId.trim()
+
+              if (trimmed) {
+                setSearchTerm('')
+                setSelectedEmployeeId(trimmed)
+              }
+            }}
+            className="mt-3 flex items-end gap-2"
+          >
+            <label className="flex-1">
+              <span className="mb-2 block text-sm font-semibold text-[var(--sea-ink)]">
+                Hoặc nhập mã nhân viên
+              </span>
+              <div className="relative">
+                <input
+                  value={manualEmployeeId}
+                  onChange={(event) => setManualEmployeeId(event.target.value)}
+                  placeholder="Nhập mã NV, không cần có trong danh sách"
+                  className="demo-input px-4 py-3 pr-10 text-sm"
+                />
+                {manualEmployeeId ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualEmployeeId('')
+                      setSelectedEmployeeId('')
+                    }}
+                    aria-label="Xóa mã nhân viên"
+                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--sea-ink-soft)] transition hover:bg-[rgba(23,58,64,0.08)] hover:text-[var(--sea-ink)]"
+                  >
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 14 14"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path
+                        d="M1 1L13 13M13 1L1 13"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+            </label>
+            <button
+              type="submit"
+              disabled={!manualEmployeeId.trim()}
+              className="rounded-md border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.16)] px-4 py-3 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:bg-[rgba(79,184,178,0.22)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Tra cứu
+            </button>
+          </form>
+
           {employeesError ? (
             <div className="mt-4 rounded-lg border border-rose-300/50 bg-rose-50 px-4 py-3 text-sm text-rose-700">
               {employeesError}
@@ -461,7 +520,12 @@ function App() {
           ) : null}
 
           <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
-            {employeesLoading ? (
+            {searchTerm.trim() === '' ? (
+              <EmptyState
+                title="Nhập từ khóa để tìm nhân viên"
+                description="Nhập mã NV, tên hoặc phòng ban vào ô tìm kiếm ở trên để hiển thị kết quả."
+              />
+            ) : employeesLoading ? (
               <LoadingBlock label="Đang tải danh sách nhân viên..." />
             ) : filteredEmployees.length ? (
               filteredEmployees.map((employee) => {
@@ -471,7 +535,10 @@ function App() {
                   <button
                     key={employee.ma_nv}
                     type="button"
-                    onClick={() => setSelectedEmployeeId(employee.ma_nv)}
+                    onClick={() => {
+                      setManualEmployeeId('')
+                      setSelectedEmployeeId(employee.ma_nv)
+                    }}
                     className={`w-full rounded-lg border px-4 py-3 text-left transition ${
                       isActive
                         ? 'border-[rgba(50,143,151,0.55)] bg-[rgba(79,184,178,0.14)] shadow-[0_0_0_1px_rgba(79,184,178,0.15)]'
@@ -511,13 +578,17 @@ function App() {
                   Thông tin nhân viên
                 </h2>
                 <p className="mt-1 text-sm">
-                  {selectedEmployee ? (
+                  {selectedEmployeeId ? (
                     <span className="font-semibold text-[var(--lagoon-deep)]">
-                      {selectedEmployee.ten} - {selectedEmployee.phong}
+                      {selectedEmployee
+                        ? `${selectedEmployee.ten} - ${selectedEmployee.phong}`
+                        : faceInfo
+                          ? normalizeDisplayText(faceInfo.userName)
+                          : `Mã ${selectedEmployeeId}`}
                     </span>
                   ) : (
                     <span className="demo-muted">
-                      Hãy chọn một nhân viên để xem chi tiết.
+                      Hãy chọn hoặc nhập mã nhân viên để xem chi tiết.
                     </span>
                   )}
                 </p>
@@ -536,18 +607,22 @@ function App() {
               </div>
             ) : null}
 
-            {selectedEmployee ? (
+            {selectedEmployeeId ? (
               <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <InfoCard
                   label="ID"
-                  value={faceInfo?.id ?? selectedEmployee.ma_nv}
+                  value={
+                    faceInfo?.id ??
+                    selectedEmployee?.ma_nv ??
+                    selectedEmployeeId
+                  }
                 />
                 <InfoCard
                   label="Tên nhân viên"
                   value={
                     faceInfo
                       ? normalizeDisplayText(faceInfo.userName)
-                      : selectedEmployee.ten
+                      : (selectedEmployee?.ten ?? 'Chưa có dữ liệu')
                   }
                 />
                 <InfoCard
@@ -586,7 +661,7 @@ function App() {
             ) : (
               <EmptyState
                 title="Chưa chọn nhân viên"
-                description="Bấm vào một nhân viên trong danh sách bên trái để xem thông tin và lịch chấm công."
+                description="Chọn nhân viên trong danh sách bên trái hoặc nhập mã nhân viên trực tiếp để xem thông tin và lịch chấm công."
               />
             )}
           </div>
@@ -596,7 +671,7 @@ function App() {
               <div>
                 <h2 className="demo-section-title text-lg">Lịch chấm công</h2>
                 <p className="demo-muted mt-1 text-sm">
-                  {selectedEmployee
+                  {selectedEmployeeId
                     ? 'Chọn tháng rồi tải dữ liệu chấm công tương ứng.'
                     : 'Cần chọn nhân viên trước khi xem dữ liệu chấm công.'}
                 </p>
@@ -656,7 +731,7 @@ function App() {
               </div>
             ) : null}
 
-            {selectedEmployee ? (
+            {selectedEmployeeId ? (
               <div className="mt-5">
                 {attendanceSections.length ? (
                   <div className="space-y-6">
@@ -701,7 +776,7 @@ function App() {
                                     } ${item.isFuture ? 'opacity-60' : ''}`}
                                   >
                                     <td className="px-4 py-3 font-semibold text-[var(--sea-ink)]">
-                                      {item.date.toString().slice(8, 10)}
+                                      {formatDayMonth(item.date)}
                                     </td>
                                     <td
                                       className={`px-4 py-3 font-semibold ${
@@ -736,6 +811,7 @@ function App() {
                                           )
                                         }
                                         isFuture={item.isFuture}
+                                        lateVariant="positive"
                                       />
                                     </td>
                                   </tr>
@@ -757,7 +833,7 @@ function App() {
             ) : (
               <EmptyState
                 title="Chưa chọn nhân viên"
-                description="Chọn nhân viên để xem lịch chấm công theo ngày."
+                description="Chọn nhân viên hoặc nhập mã nhân viên để xem lịch chấm công theo ngày."
               />
             )}
           </div>
@@ -817,10 +893,12 @@ function AttendanceValue({
   value,
   isLate,
   isFuture,
+  lateVariant = 'warning',
 }: {
   value: string | null | undefined
   isLate: boolean
   isFuture: boolean
+  lateVariant?: 'warning' | 'positive'
 }) {
   if (!value) {
     return (
@@ -830,11 +908,21 @@ function AttendanceValue({
     )
   }
 
+  const badgeClasses =
+    lateVariant === 'positive'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      : 'border-amber-200 bg-amber-50 text-amber-700'
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="font-semibold text-[var(--sea-ink)]">{value}</span>
+      <span className="font-semibold text-[var(--sea-ink)]">
+        <span className="sm:hidden">{formatHHMM(value)}</span>
+        <span className="hidden sm:inline">{value}</span>
+      </span>
       {isLate ? (
-        <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+        <span
+          className={`hidden rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] sm:inline-flex ${badgeClasses}`}
+        >
           Muộn
         </span>
       ) : null}
@@ -889,6 +977,16 @@ function formatDateInput(date: Date) {
   const day = String(date.getDate()).padStart(2, '0')
 
   return `${year}-${month}-${day}`
+}
+
+function formatDayMonth(dateValue: string) {
+  const [, month, day] = dateValue.split('-')
+
+  return `${Number(day)}/${Number(month)}`
+}
+
+function formatHHMM(timeValue: string) {
+  return timeValue.split(':').slice(0, 2).join(':')
 }
 
 function getMonthInputValue(date: Date) {
