@@ -43,7 +43,6 @@ function App() {
   const [employeesLoading, setEmployeesLoading] = useState(true)
   const [employeesError, setEmployeesError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [manualEmployeeId, setManualEmployeeId] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
   const [faceInfo, setFaceInfo] = useState<FaceInfoResponse | null>(null)
   const [faceLoading, setFaceLoading] = useState(false)
@@ -152,7 +151,7 @@ function App() {
   }, [selectedEmployeeId])
 
   // Chọn nhân viên hoặc đổi tháng xong thì tự động tải lịch chấm công,
-  // không cần bấm nút riêng nữa.
+  // không cần bấm nút riêng nữa. Chỉ tải đến hết ngày hôm nay trong tháng đó.
   useEffect(() => {
     setAttendanceRecords([])
     setAttendanceError(null)
@@ -161,16 +160,15 @@ function App() {
       return
     }
 
-    const startDate = parseMonthInput(attendanceMonth)
+    const range = getAttendanceRange(attendanceMonth)
 
-    if (!startDate) {
-      setAttendanceError('Tháng đã chọn không hợp lệ.')
+    if (!range) {
+      setAttendanceError('Tháng đã chọn chưa tới, chưa có dữ liệu.')
       return
     }
 
-    const endDate = getMonthLastDay(startDate)
-    const startDateInput = formatDateInput(startDate)
-    const endDateInput = formatDateInput(endDate)
+    const startDateInput = formatDateInput(range.start)
+    const endDateInput = formatDateInput(range.end)
 
     const controller = new AbortController()
 
@@ -271,14 +269,11 @@ function App() {
     const recordsByDate = new Map(
       attendanceRecords.map((record) => [record.WorkDate, record]),
     )
-    const startDate = parseMonthInput(attendanceMonth)
-    const endDate = startDate ? getMonthLastDay(startDate) : null
+    const range = getAttendanceRange(attendanceMonth)
 
-    if (!startDate || !endDate) {
+    if (!range) {
       return []
     }
-
-    const today = formatDateInput(new Date())
 
     const sections: Array<{
       monthKey: string
@@ -287,14 +282,13 @@ function App() {
         date: string
         weekday: string
         isWeekend: boolean
-        isFuture: boolean
         record: AttendanceRecord | undefined
       }>
     }> = []
 
-    const cursor = new Date(endDate)
+    const cursor = new Date(range.end)
 
-    while (cursor >= startDate) {
+    while (cursor >= range.start) {
       const date = formatDateInput(cursor)
       const monthKey = date.slice(0, 7)
       const monthTitle = formatMonthTitle(cursor)
@@ -305,7 +299,6 @@ function App() {
         date,
         weekday: weekdayLabels[dayOfWeek],
         isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-        isFuture: date > today,
         record,
       }
 
@@ -334,16 +327,15 @@ function App() {
       return
     }
 
-    const startDate = parseMonthInput(attendanceMonth)
+    const range = getAttendanceRange(attendanceMonth)
 
-    if (!startDate) {
-      setAttendanceError('Tháng đã chọn không hợp lệ.')
+    if (!range) {
+      setAttendanceError('Tháng đã chọn chưa tới, chưa có dữ liệu.')
       return
     }
 
-    const endDate = getMonthLastDay(startDate)
-    const startDateInput = formatDateInput(startDate)
-    const endDateInput = formatDateInput(endDate)
+    const startDateInput = formatDateInput(range.start)
+    const endDateInput = formatDateInput(range.end)
 
     try {
       setAttendanceLoading(true)
@@ -375,22 +367,25 @@ function App() {
 
   return (
     <main className="demo-page demo-page-wide px-4 pb-10 pt-6 sm:pt-8">
-      <section className="demo-panel relative overflow-hidden rounded-2xl px-5 py-6 sm:px-7 sm:py-8">
-        <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(79,184,178,0.26),transparent_66%)]" />
-        <div className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(47,106,74,0.16),transparent_66%)]" />
+      <section className="demo-panel relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm sm:px-7 sm:py-8">
+        <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(66,133,244,0.12),transparent_66%)]" />
+        <div className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(52,168,83,0.10),transparent_66%)]" />
         <div className="relative grid gap-4 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.24em] text-[var(--kicker)]">
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.24em] text-slate-500">
               Tra cứu thông tin chấm công
             </p>
-            <h1 className="display-title m-0 text-3xl font-bold leading-[1.02] text-[var(--sea-ink)] sm:text-5xl">
+            <h1 className="display-title m-0 text-3xl font-bold leading-[1.02] text-slate-900 sm:text-5xl">
               Danh sách nhân viên và lịch chấm công theo ngày
             </h1>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-3">
             <StatCard label="Nhân viên" value={String(employees.length)} />
-            <StatCard label="Đã chọn" value={selectedEmployeeId || 'Chưa có'} />
+            <StatCard
+              label="Đã chọn"
+              value={selectedEmployee ? selectedEmployee.ma_nv : 'Chưa có'}
+            />
             <StatCard
               label="Trạng thái"
               value={employeesLoading ? 'Đang tải' : 'Sẵn sàng'}
@@ -403,17 +398,17 @@ function App() {
         <aside className="demo-panel">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <h2 className="demo-section-title text-lg">
+              <h2 className="demo-section-title text-lg text-slate-900">
                 Danh sách nhân viên
               </h2>
-              <p className="demo-muted mt-1 text-sm">
+              <p className="mt-1 text-sm text-slate-500">
                 Tìm nhanh theo mã, tên hoặc phòng ban.
               </p>
             </div>
           </div>
 
           <label className="mt-4 block">
-            <span className="mb-2 block text-sm font-semibold text-[var(--sea-ink)]">
+            <span className="mb-2 block text-sm font-semibold text-slate-700">
               Tìm kiếm
             </span>
             <div className="relative">
@@ -421,18 +416,17 @@ function App() {
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Nhập mã NV, tên hoặc phòng ban"
-                className="demo-input px-4 py-3 pr-10 text-sm"
+                className="demo-input w-full rounded-lg border border-slate-300 bg-white px-4 py-3 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
               />
               {searchTerm ? (
                 <button
                   type="button"
                   onClick={() => {
                     setSearchTerm('')
-                    setManualEmployeeId('')
                     setSelectedEmployeeId('')
                   }}
                   aria-label="Xóa từ khóa tìm kiếm"
-                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--sea-ink-soft)] transition hover:bg-[rgba(23,58,64,0.08)] hover:text-[var(--sea-ink)]"
+                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                 >
                   <svg
                     width="14"
@@ -453,73 +447,13 @@ function App() {
             </div>
           </label>
 
-          <form
-            onSubmit={(event) => {
-              event.preventDefault()
-              const trimmed = manualEmployeeId.trim()
-
-              if (trimmed) {
-                setSearchTerm('')
-                setSelectedEmployeeId(trimmed)
-              }
-            }}
-            className="mt-3 flex items-end gap-2"
-          >
-            <label className="flex-1">
-              <span className="mb-2 block text-sm font-semibold text-[var(--sea-ink)]">
-                Hoặc nhập mã nhân viên
-              </span>
-              <div className="relative">
-                <input
-                  value={manualEmployeeId}
-                  onChange={(event) => setManualEmployeeId(event.target.value)}
-                  placeholder="Nhập mã NV, không cần có trong danh sách"
-                  className="demo-input px-4 py-3 pr-10 text-sm"
-                />
-                {manualEmployeeId ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManualEmployeeId('')
-                      setSelectedEmployeeId('')
-                    }}
-                    aria-label="Xóa mã nhân viên"
-                    className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--sea-ink-soft)] transition hover:bg-[rgba(23,58,64,0.08)] hover:text-[var(--sea-ink)]"
-                  >
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 14 14"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        d="M1 1L13 13M13 1L1 13"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
-            </label>
-            <button
-              type="submit"
-              disabled={!manualEmployeeId.trim()}
-              className="rounded-md border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.16)] px-4 py-3 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:bg-[rgba(79,184,178,0.22)] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Tra cứu
-            </button>
-          </form>
-
           {employeesError ? (
-            <div className="mt-4 rounded-lg border border-rose-300/50 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {employeesError}
             </div>
           ) : null}
 
-          <div className="mt-4 max-h-[620px] space-y-2 overflow-auto pr-1">
+          <div className="mt-4 max-h-[320px] space-y-2 overflow-auto pr-1 sm:max-h-[620px]">
             {searchTerm.trim() === '' ? (
               <EmptyState
                 title="Nhập từ khóa để tìm nhân viên"
@@ -535,26 +469,23 @@ function App() {
                   <button
                     key={employee.ma_nv}
                     type="button"
-                    onClick={() => {
-                      setManualEmployeeId('')
-                      setSelectedEmployeeId(employee.ma_nv)
-                    }}
+                    onClick={() => setSelectedEmployeeId(employee.ma_nv)}
                     className={`w-full rounded-lg border px-4 py-3 text-left transition ${
                       isActive
-                        ? 'border-[rgba(50,143,151,0.55)] bg-[rgba(79,184,178,0.14)] shadow-[0_0_0_1px_rgba(79,184,178,0.15)]'
-                        : 'border-[var(--line)] bg-[rgba(255,255,255,0.55)] hover:border-[rgba(50,143,151,0.28)] hover:bg-[rgba(255,255,255,0.72)]'
+                        ? 'border-blue-300 bg-blue-50 shadow-[0_0_0_1px_rgba(66,133,244,0.25)]'
+                        : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="m-0 text-sm font-bold text-[var(--sea-ink)]">
+                        <p className="m-0 text-sm font-bold text-slate-900">
                           {employee.ten}
                         </p>
-                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--kicker)]">
+                        <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                           Mã {employee.ma_nv}
                         </p>
                       </div>
-                      <span className="rounded-md border border-[var(--line)] bg-[var(--chip-bg)] px-3 py-1 text-xs font-semibold text-[var(--sea-ink-soft)]">
+                      <span className="rounded-md border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                         {employee.phong}
                       </span>
                     </div>
@@ -574,55 +505,47 @@ function App() {
           <div className="demo-panel">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <h2 className="demo-section-title text-lg">
+                <h2 className="demo-section-title text-lg text-slate-900">
                   Thông tin nhân viên
                 </h2>
                 <p className="mt-1 text-sm">
-                  {selectedEmployeeId ? (
-                    <span className="font-semibold text-[var(--lagoon-deep)]">
-                      {selectedEmployee
-                        ? `${selectedEmployee.ten} - ${selectedEmployee.phong}`
-                        : faceInfo
-                          ? normalizeDisplayText(faceInfo.userName)
-                          : `Mã ${selectedEmployeeId}`}
+                  {selectedEmployee ? (
+                    <span className="font-semibold text-blue-700">
+                      {selectedEmployee.ten} - {selectedEmployee.phong}
                     </span>
                   ) : (
-                    <span className="demo-muted">
-                      Hãy chọn hoặc nhập mã nhân viên để xem chi tiết.
+                    <span className="text-slate-500">
+                      Hãy chọn một nhân viên để xem chi tiết.
                     </span>
                   )}
                 </p>
               </div>
 
               {faceLoading ? (
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--kicker)]">
+                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   Đang tải thông tin...
                 </span>
               ) : null}
             </div>
 
             {faceError ? (
-              <div className="mt-4 rounded-lg border border-rose-300/50 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {faceError}
               </div>
             ) : null}
 
-            {selectedEmployeeId ? (
+            {selectedEmployee ? (
               <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <InfoCard
                   label="ID"
-                  value={
-                    faceInfo?.id ??
-                    selectedEmployee?.ma_nv ??
-                    selectedEmployeeId
-                  }
+                  value={faceInfo?.id ?? selectedEmployee.ma_nv}
                 />
                 <InfoCard
                   label="Tên nhân viên"
                   value={
                     faceInfo
                       ? normalizeDisplayText(faceInfo.userName)
-                      : (selectedEmployee?.ten ?? 'Chưa có dữ liệu')
+                      : selectedEmployee.ten
                   }
                 />
                 <InfoCard
@@ -661,7 +584,7 @@ function App() {
             ) : (
               <EmptyState
                 title="Chưa chọn nhân viên"
-                description="Chọn nhân viên trong danh sách bên trái hoặc nhập mã nhân viên trực tiếp để xem thông tin và lịch chấm công."
+                description="Bấm vào một nhân viên trong danh sách bên trái để xem thông tin và lịch chấm công."
               />
             )}
           </div>
@@ -669,9 +592,11 @@ function App() {
           <div className="demo-panel">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h2 className="demo-section-title text-lg">Lịch chấm công</h2>
-                <p className="demo-muted mt-1 text-sm">
-                  {selectedEmployeeId
+                <h2 className="demo-section-title text-lg text-slate-900">
+                  Lịch chấm công
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedEmployee
                     ? 'Chọn tháng rồi tải dữ liệu chấm công tương ứng.'
                     : 'Cần chọn nhân viên trước khi xem dữ liệu chấm công.'}
                 </p>
@@ -679,14 +604,14 @@ function App() {
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <label>
-                  <span className="mb-2 block text-sm font-semibold text-[var(--sea-ink)]">
+                  <span className="mb-2 block text-sm font-semibold text-slate-700">
                     Tháng
                   </span>
                   <input
                     type="month"
                     value={attendanceMonth}
                     onChange={(event) => setAttendanceMonth(event.target.value)}
-                    className="demo-input px-4 py-3 text-sm"
+                    className="demo-input rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
                 </label>
                 <div className="flex items-end">
@@ -694,7 +619,7 @@ function App() {
                     type="button"
                     onClick={handleReloadAttendance}
                     disabled={!selectedEmployeeId || attendanceLoading}
-                    className="w-full rounded-md border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.16)] px-5 py-3 text-sm font-semibold text-[var(--lagoon-deep)] transition hover:bg-[rgba(79,184,178,0.22)] disabled:cursor-not-allowed disabled:opacity-50"
+                    className="w-full rounded-md border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {attendanceLoading ? 'Đang tải...' : 'Tải lại'}
                   </button>
@@ -706,50 +631,50 @@ function App() {
               <SummaryStat
                 label="Ngày đi làm"
                 value={String(attendanceStats.totalWorkDays)}
-                // hint="Số ngày có workdate"
+                hint="Số ngày có workdate"
               />
               <SummaryStat
                 label="Ngày đi muộn"
                 value={String(attendanceStats.lateDays)}
-                // hint="FirstCheckIn sau 07:30 (trừ T7, CN)"
+                hint="FirstCheckIn sau 07:30 (trừ T7, CN)"
               />
               <SummaryStat
                 label="Ngày về sau 18h"
                 value={String(attendanceStats.lateCheckoutDays)}
-                // hint="LastCheckOut sau 18:00 (trừ T7, CN)"
+                hint="LastCheckOut sau 18:00 (trừ T7, CN)"
               />
               <SummaryStat
                 label="Tháng"
                 value={formatMonthLabel(attendanceMonth).replace('Tháng ', '')}
-                // hint="Dữ liệu đang hiển thị"
+                hint="Dữ liệu đang hiển thị"
               />
             </div>
 
             {attendanceError ? (
-              <div className="mt-4 rounded-lg border border-rose-300/50 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {attendanceError}
               </div>
             ) : null}
 
-            {selectedEmployeeId ? (
+            {selectedEmployee ? (
               <div className="mt-5">
                 {attendanceSections.length ? (
                   <div className="space-y-6">
                     {attendanceSections.map((section) => (
                       <section key={section.monthKey}>
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                          <h3 className="m-0 text-base font-bold text-[var(--sea-ink)]">
+                          <h3 className="m-0 text-base font-bold text-slate-900">
                             {section.title}
                           </h3>
-                          <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--kicker)]">
+                          <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                             {section.items.length} ngày
                           </p>
                         </div>
 
-                        <div className="overflow-hidden rounded-xl border border-[var(--line)] bg-white/70 shadow-[0_10px_30px_rgba(23,58,64,0.05)]">
+                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
                           <div className="overflow-x-auto">
                             <table className="min-w-full border-collapse text-left text-sm">
-                              <thead className="bg-[rgba(79,184,178,0.12)] text-[var(--sea-ink)]">
+                              <thead className="bg-slate-50 text-slate-700">
                                 <tr>
                                   <th className="px-4 py-3 font-semibold">
                                     Ngày
@@ -769,20 +694,20 @@ function App() {
                                 {section.items.map((item) => (
                                   <tr
                                     key={item.date}
-                                    className={`border-t border-[var(--line)] ${
+                                    className={`border-t border-slate-200 ${
                                       item.isWeekend
-                                        ? 'bg-[rgba(244,63,94,0.04)]'
-                                        : 'odd:bg-white even:bg-[rgba(244,250,247,0.85)]'
-                                    } ${item.isFuture ? 'opacity-60' : ''}`}
+                                        ? 'bg-red-50/60'
+                                        : 'odd:bg-white even:bg-slate-50/70'
+                                    }`}
                                   >
-                                    <td className="px-4 py-3 font-semibold text-[var(--sea-ink)]">
+                                    <td className="px-4 py-3 font-semibold text-slate-900">
                                       {formatDayMonth(item.date)}
                                     </td>
                                     <td
                                       className={`px-4 py-3 font-semibold ${
                                         item.isWeekend
-                                          ? 'text-rose-600'
-                                          : 'text-[var(--sea-ink-soft)]'
+                                          ? 'text-red-600'
+                                          : 'text-slate-500'
                                       }`}
                                     >
                                       {item.weekday}
@@ -797,7 +722,6 @@ function App() {
                                             '07:30:00',
                                           )
                                         }
-                                        isFuture={item.isFuture}
                                       />
                                     </td>
                                     <td className="px-4 py-3">
@@ -810,7 +734,6 @@ function App() {
                                             '18:00:00',
                                           )
                                         }
-                                        isFuture={item.isFuture}
                                         lateVariant="positive"
                                       />
                                     </td>
@@ -826,14 +749,14 @@ function App() {
                 ) : (
                   <EmptyState
                     title="Chưa có dữ liệu chấm công"
-                    description="Bấm tải lịch chấm công để xem dữ liệu theo các ngày trong khoảng đã chọn."
+                    description="Chưa có ngày nào tính đến hôm nay trong tháng đã chọn, hoặc chưa có dữ liệu được ghi nhận."
                   />
                 )}
               </div>
             ) : (
               <EmptyState
                 title="Chưa chọn nhân viên"
-                description="Chọn nhân viên hoặc nhập mã nhân viên để xem lịch chấm công theo ngày."
+                description="Chọn nhân viên để xem lịch chấm công theo ngày."
               />
             )}
           </div>
@@ -845,11 +768,11 @@ function App() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.56)] px-4 py-3">
-      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--kicker)]">
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 break-words text-sm font-bold text-[var(--sea-ink)]">
+      <p className="mt-2 break-words text-sm font-bold text-slate-900">
         {value}
       </p>
     </div>
@@ -866,23 +789,23 @@ function SummaryStat({
   hint: string
 }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.78)] px-4 py-4 shadow-[0_10px_24px_rgba(23,58,64,0.04)]">
-      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--kicker)]">
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-bold text-[var(--sea-ink)]">{value}</p>
-      <p className="mt-1 text-xs text-[var(--sea-ink-soft)]">{hint}</p>
+      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+      <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   )
 }
 
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.6)] p-4">
-      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--kicker)]">
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
-      <p className="mt-2 break-words text-sm font-semibold leading-6 text-[var(--sea-ink)]">
+      <p className="mt-2 break-words text-sm font-semibold leading-6 text-slate-900">
         {value}
       </p>
     </div>
@@ -892,30 +815,24 @@ function InfoCard({ label, value }: { label: string; value: string }) {
 function AttendanceValue({
   value,
   isLate,
-  isFuture,
   lateVariant = 'warning',
 }: {
   value: string | null | undefined
   isLate: boolean
-  isFuture: boolean
   lateVariant?: 'warning' | 'positive'
 }) {
   if (!value) {
-    return (
-      <span className="text-[var(--sea-ink-soft)]">
-        {isFuture ? 'Chưa có dữ liệu' : 'Không có dữ liệu'}
-      </span>
-    )
+    return <span className="text-slate-400">Không có dữ liệu</span>
   }
 
   const badgeClasses =
     lateVariant === 'positive'
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-      : 'border-amber-200 bg-amber-50 text-amber-700'
+      ? 'border-green-200 bg-green-50 text-green-700'
+      : 'border-amber-300 bg-amber-50 text-amber-800'
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="font-semibold text-[var(--sea-ink)]">
+      <span className="font-semibold text-slate-900">
         <span className="sm:hidden">{formatHHMM(value)}</span>
         <span className="hidden sm:inline">{value}</span>
       </span>
@@ -932,7 +849,7 @@ function AttendanceValue({
 
 function LoadingBlock({ label }: { label: string }) {
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-[rgba(255,255,255,0.5)] px-4 py-5 text-center text-sm text-[var(--sea-ink-soft)]">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
       {label}
     </div>
   )
@@ -946,9 +863,9 @@ function EmptyState({
   description: string
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-[rgba(50,143,151,0.22)] bg-[rgba(255,255,255,0.46)] px-5 py-10 text-center mt-4">
-      <p className="m-0 text-base font-bold text-[var(--sea-ink)]">{title}</p>
-      <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-[var(--sea-ink-soft)]">
+    <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+      <p className="m-0 text-base font-bold text-slate-900">{title}</p>
+      <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">
         {description}
       </p>
     </div>
@@ -1014,6 +931,28 @@ function parseMonthInput(value: string) {
 
 function getMonthLastDay(monthStart: Date) {
   return new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
+}
+
+// Chỉ trả về khoảng ngày từ đầu tháng đến hôm nay (nếu là tháng hiện tại)
+// hoặc trọn tháng (nếu tháng đã qua). Trả về null nếu tháng chọn ở tương lai.
+function getAttendanceRange(monthValue: string) {
+  const start = parseMonthInput(monthValue)
+
+  if (!start) {
+    return null
+  }
+
+  const monthLastDay = getMonthLastDay(start)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const end = monthLastDay < today ? monthLastDay : today
+
+  if (end < start) {
+    return null
+  }
+
+  return { start, end }
 }
 
 function formatMonthTitle(date: Date) {
