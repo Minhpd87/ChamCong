@@ -216,8 +216,21 @@ function App() {
     }
   }, [selectedEmployeeId, attendanceMonth])
 
+  function handleSearchTermChange(value: string) {
+    setSearchTerm(value)
+
+    if (value.trim() === '') {
+      setAttendanceMonth(getMonthInputValue(new Date()))
+    }
+  }
+
+  function handleClearSearch() {
+    handleSearchTermChange('')
+    setSelectedEmployeeId('')
+  }
+
   const filteredEmployees = useMemo(() => {
-    const keyword = searchTerm.trim().toLowerCase()
+    const keyword = normalizeSearchText(searchTerm)
 
     if (!keyword) {
       return employees
@@ -225,9 +238,9 @@ function App() {
 
     return employees.filter((employee) => {
       return (
-        employee.ma_nv.toLowerCase().includes(keyword) ||
-        employee.ten.toLowerCase().includes(keyword) ||
-        employee.phong.toLowerCase().includes(keyword)
+        normalizeSearchText(employee.ma_nv).includes(keyword) ||
+        normalizeSearchText(employee.ten).includes(keyword) ||
+        normalizeSearchText(employee.phong).includes(keyword)
       )
     })
   }, [employees, searchTerm])
@@ -240,14 +253,20 @@ function App() {
   }, [employees, selectedEmployeeId])
 
   const attendanceStats = useMemo(() => {
-    let totalWorkDays = 0
+    let weekdayWorkedDays = 0
+    let weekendWorkedDays = 0
     let lateDays = 0
     let lateCheckoutDays = 0
+    const monthDayTotals = getMonthDayTotals(attendanceMonth)
 
     for (const record of attendanceRecords) {
-      totalWorkDays += 1
-
       const weekend = isWeekendDate(record.WorkDate)
+
+      if (weekend) {
+        weekendWorkedDays += 1
+      } else {
+        weekdayWorkedDays += 1
+      }
 
       if (!weekend && isAfterCutoff(record.FirstCheckIn, '07:30:00')) {
         lateDays += 1
@@ -259,11 +278,14 @@ function App() {
     }
 
     return {
-      totalWorkDays,
+      weekdayWorkedDays,
+      weekendWorkedDays,
+      totalWeekdaysInMonth: monthDayTotals.weekdays,
+      totalWeekendDaysInMonth: monthDayTotals.weekends,
       lateDays,
       lateCheckoutDays,
     }
-  }, [attendanceRecords])
+  }, [attendanceMonth, attendanceRecords])
 
   const attendanceSections = useMemo(() => {
     const recordsByDate = new Map(
@@ -367,7 +389,7 @@ function App() {
 
   return (
     <main className="demo-page demo-page-wide px-4 pb-10 pt-6 sm:pt-8">
-      <section className="demo-panel relative overflow-hidden rounded-2xl border border-slate-200 bg-white px-5 py-6 shadow-sm sm:px-7 sm:py-8">
+      <section className="demo-panel relative overflow-hidden rounded-2xl border border-slate-300 bg-white px-5 py-6 shadow-sm sm:px-7 sm:py-8">
         <div className="pointer-events-none absolute -left-20 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(66,133,244,0.12),transparent_66%)]" />
         <div className="pointer-events-none absolute -bottom-24 -right-16 h-64 w-64 rounded-full bg-[radial-gradient(circle,rgba(52,168,83,0.10),transparent_66%)]" />
         <div className="relative grid gap-4 lg:grid-cols-[1.2fr_0.8fr] lg:items-end">
@@ -376,7 +398,7 @@ function App() {
               Tra cứu thông tin chấm công
             </p>
             <h1 className="display-title m-0 text-3xl font-bold leading-[1.02] text-slate-900 sm:text-5xl">
-              Danh sách nhân viên và lịch chấm công theo ngày
+              Danh sách của Sở Tài chính
             </h1>
           </div>
 
@@ -414,19 +436,16 @@ function App() {
             <div className="relative">
               <input
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) => handleSearchTermChange(event.target.value)}
                 placeholder="Nhập mã NV, tên hoặc phòng ban"
-                className="demo-input w-full rounded-lg border border-slate-300 bg-white px-4 py-3 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className=" w-full rounded-md border border-slate-400 bg-white px-4 py-3 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
               />
               {searchTerm ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchTerm('')
-                    setSelectedEmployeeId('')
-                  }}
+                  onClick={handleClearSearch}
                   aria-label="Xóa từ khóa tìm kiếm"
-                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+                  className="hover:cursor-pointer absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                 >
                   <svg
                     width="14"
@@ -473,21 +492,27 @@ function App() {
                     className={`w-full rounded-lg border px-4 py-3 text-left transition ${
                       isActive
                         ? 'border-blue-300 bg-blue-50 shadow-[0_0_0_1px_rgba(66,133,244,0.25)]'
-                        : 'border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50'
+                        : 'border-slate-300 bg-white hover:border-blue-200 hover:bg-slate-100 hover:cursor-pointer'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="m-0 text-sm font-bold text-slate-900">
+                        <p className="m-0 text-sm font-bold text-teal-700">
                           {employee.ten}
                         </p>
+                        <p className="mt-1 text-xs font-semibold text-slate-600">
+                          {employee.phong}
+                        </p>
                         <p className="mt-1 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          Mã {employee.ma_nv}
+                          Mã{' '}
+                          <span className="font-bold text-slate-900">
+                            {employee.ma_nv}
+                          </span>
                         </p>
                       </div>
-                      <span className="rounded-md border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                      {/* <span className="rounded-md border border-slate-300 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                         {employee.phong}
-                      </span>
+                      </span> */}
                     </div>
                   </button>
                 )
@@ -535,19 +560,19 @@ function App() {
             ) : null}
 
             {selectedEmployee ? (
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <InfoCard
                   label="ID"
                   value={faceInfo?.id ?? selectedEmployee.ma_nv}
                 />
-                <InfoCard
+                {/* <InfoCard
                   label="Tên nhân viên"
                   value={
                     faceInfo
                       ? normalizeDisplayText(faceInfo.userName)
                       : selectedEmployee.ten
                   }
-                />
+                /> */}
                 <InfoCard
                   label="Khoảng cách cho phép"
                   value={
@@ -572,14 +597,14 @@ function App() {
                       : 'Chưa có dữ liệu'
                   }
                 />
-                <InfoCard
+                {/* <InfoCard
                   label="Đi công tác / Phê duyệt"
                   value={
                     faceInfo
                       ? `${faceInfo.IsBusinessTrip ? 'Công tác' : 'Không công tác'} / ${faceInfo.IsApprover ? 'Có duyệt' : 'Không duyệt'}`
                       : 'Chưa có dữ liệu'
                   }
-                />
+                /> */}
               </div>
             ) : (
               <EmptyState
@@ -629,25 +654,30 @@ function App() {
 
             <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <SummaryStat
-                label="Ngày đi làm"
-                value={String(attendanceStats.totalWorkDays)}
-                hint="Số ngày có workdate"
+                label="Ngày đi làm ngày thường"
+                value={`${attendanceStats.weekdayWorkedDays}/${attendanceStats.totalWeekdaysInMonth}`}
+                // hint="Số ngày có workdate trên tổng số ngày làm việc trong tháng"
+              />
+              <SummaryStat
+                label="Ngày đi làm cuối tuần"
+                value={`${attendanceStats.weekendWorkedDays}/${attendanceStats.totalWeekendDaysInMonth}`}
+                // hint="Số ngày có workdate trên tổng số ngày Thứ bảy và Chủ nhật trong tháng"
               />
               <SummaryStat
                 label="Ngày đi muộn"
                 value={String(attendanceStats.lateDays)}
-                hint="FirstCheckIn sau 07:30 (trừ T7, CN)"
+                // hint="FirstCheckIn sau 07:30, chỉ tính ngày thường"
               />
               <SummaryStat
                 label="Ngày về sau 18h"
                 value={String(attendanceStats.lateCheckoutDays)}
-                hint="LastCheckOut sau 18:00 (trừ T7, CN)"
+                // hint="LastCheckOut sau 18:00, chỉ tính ngày thường"
               />
-              <SummaryStat
+              {/* <SummaryStat
                 label="Tháng"
                 value={formatMonthLabel(attendanceMonth).replace('Tháng ', '')}
-                hint="Dữ liệu đang hiển thị"
-              />
+                // hint="Dữ liệu đang hiển thị"
+              /> */}
             </div>
 
             {attendanceError ? (
@@ -663,15 +693,15 @@ function App() {
                     {attendanceSections.map((section) => (
                       <section key={section.monthKey}>
                         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                          <h3 className="m-0 text-base font-bold text-slate-900">
+                          <h3 className="m-0 text-base font-bold text-red-800 uppercase">
                             {section.title}
                           </h3>
-                          <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-red-800">
                             {section.items.length} ngày
                           </p>
                         </div>
 
-                        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                        <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xs">
                           <div className="overflow-x-auto">
                             <table className="min-w-full border-collapse text-left text-sm">
                               <thead className="bg-slate-50 text-slate-700">
@@ -694,7 +724,7 @@ function App() {
                                 {section.items.map((item) => (
                                   <tr
                                     key={item.date}
-                                    className={`border-t border-slate-200 ${
+                                    className={`border-t border-slate-300 ${
                                       item.isWeekend
                                         ? 'bg-red-50/60'
                                         : 'odd:bg-white even:bg-slate-50/70'
@@ -768,7 +798,7 @@ function App() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+    <div className="rounded-xl border border-slate-300 bg-white px-4 py-3">
       <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
         {label}
       </p>
@@ -789,11 +819,11 @@ function SummaryStat({
   hint: string
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
-      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <div className="rounded-xl border border-slate-300 bg-white px-4 py-4 shadow-sm">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
         {label}
       </p>
-      <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+      <p className="mt-2 text-2xl font-bold text-teal-800">{value}</p>
       <p className="mt-1 text-xs text-slate-500">{hint}</p>
     </div>
   )
@@ -801,11 +831,11 @@ function SummaryStat({
 
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4">
-      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+    <div className="rounded-xl border border-slate-300 bg-white p-4">
+      <p className="m-0 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700">
         {label}
       </p>
-      <p className="mt-2 break-words text-sm font-semibold leading-6 text-slate-900">
+      <p className="mt-2 break-words text-normal font-bold leading-6 text-teal-900">
         {value}
       </p>
     </div>
@@ -849,7 +879,7 @@ function AttendanceValue({
 
 function LoadingBlock({ label }: { label: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
+    <div className="rounded-lg border border-slate-300 bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
       {label}
     </div>
   )
@@ -863,7 +893,7 @@ function EmptyState({
   description: string
 }) {
   return (
-    <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-5 py-10 text-center">
+    <div className="mt-4 rounded-xl border border-dashed border-slate-400 bg-slate-50 px-5 py-10 text-center">
       <p className="m-0 text-base font-bold text-slate-900">{title}</p>
       <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-500">
         {description}
@@ -933,6 +963,34 @@ function getMonthLastDay(monthStart: Date) {
   return new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
 }
 
+function getMonthDayTotals(monthValue: string) {
+  const monthStart = parseMonthInput(monthValue)
+
+  if (!monthStart) {
+    return { weekdays: 0, weekends: 0 }
+  }
+
+  const monthEnd = getMonthLastDay(monthStart)
+  let weekdays = 0
+  let weekends = 0
+
+  for (
+    const cursor = new Date(monthStart);
+    cursor <= monthEnd;
+    cursor.setDate(cursor.getDate() + 1)
+  ) {
+    const day = cursor.getDay()
+
+    if (day === 0 || day === 6) {
+      weekends += 1
+    } else {
+      weekdays += 1
+    }
+  }
+
+  return { weekdays, weekends }
+}
+
 // Chỉ trả về khoảng ngày từ đầu tháng đến hôm nay (nếu là tháng hiện tại)
 // hoặc trọn tháng (nếu tháng đã qua). Trả về null nếu tháng chọn ở tương lai.
 function getAttendanceRange(monthValue: string) {
@@ -967,6 +1025,15 @@ function formatMonthLabel(value: string) {
 
 function normalizeDisplayText(value: string) {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeSearchText(value: string) {
+  return normalizeDisplayText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'd')
+    .toLowerCase()
 }
 
 function sortAttendanceRecords(records: AttendanceRecord[]) {
