@@ -16,7 +16,8 @@ export const Route = createRootRoute({
       },
       {
         name: 'viewport',
-        content: 'width=device-width, initial-scale=1',
+        content: 'width=device-width, initial-scale=1',//
+        content: 'width=1280',
       },
       {
         title: 'TanStack Start Starter',
