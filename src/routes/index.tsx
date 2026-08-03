@@ -107,6 +107,11 @@ async function fetchAttendance(
 // cách đọc `deps`, v.v.) có thể lệch đôi chút giữa các bản TanStack Router —
 // kiểm tra lại theo version đang dùng trong project nếu compiler báo lỗi type.
 export const Route = createFileRoute('/')({
+  // Bắt buộc chạy loader ở client: nhanvien.json (resolve qua import.meta.url)
+  // và API chamcong.haiphong.gov.vn chỉ gọi được từ trình duyệt người dùng,
+  // không gọi được từ server/Netlify Function lúc SSR — chạy trên server sẽ
+  // báo lỗi "fetch failed".
+  ssr: false,
   validateSearch: (search: Record<string, unknown>): AttendanceSearch => ({
     employeeId:
       typeof search.employeeId === 'string' && search.employeeId
