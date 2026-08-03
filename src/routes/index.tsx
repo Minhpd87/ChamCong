@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 
-import { createFileRoute } from '@tanstack/react-router'
+import {
+  createFileRoute,
+  useRouter,
+  useRouterState,
+} from '@tanstack/react-router'
 
 type Employee = {
   ma_nv: string
@@ -29,6 +33,20 @@ type AttendanceRecord = {
   LastCheckOut: string | null
 }
 
+type AttendanceSearch = {
+  employeeId?: string
+  month?: string
+}
+
+type AttendanceLoaderData = {
+  employees: Employee[]
+  employeesError: string | null
+  faceInfo: FaceInfoResponse | null
+  faceError: string | null
+  attendanceRecords: AttendanceRecord[]
+  attendanceError: string | null
+}
+
 const employeesUrl = new URL('../../nhanvien.json', import.meta.url).href
 const faceInfoUrl = 'https://chamcong.haiphong.gov.vn/api/LAY_FACEID'
 const attendanceUrl =
@@ -36,197 +54,186 @@ const attendanceUrl =
 
 const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
-export const Route = createFileRoute('/')({ component: App })
+async function fetchEmployees(signal?: AbortSignal): Promise<Employee[]> {
+  const response = await fetch(employeesUrl, { signal })
+
+  if (!response.ok) {
+    throw new Error(`Không thể tải danh sách nhân viên (${response.status})`)
+  }
+
+  const data = (await response.json()) as Employee[]
+  return Array.isArray(data) ? data : []
+}
+
+async function fetchFaceInfo(
+  employeeId: string,
+  signal?: AbortSignal,
+): Promise<FaceInfoResponse> {
+  const response = await fetch(
+    `${faceInfoUrl}?nhanvien=${encodeURIComponent(employeeId)}`,
+    { signal },
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `Không thể tải thông tin nhân viên (${response.status})`,
+    )
+  }
+
+  return (await response.json()) as FaceInfoResponse
+}
+
+async function fetchAttendance(
+  employeeId: string,
+  range: { start: Date; end: Date },
+  signal?: AbortSignal,
+): Promise<AttendanceRecord[]> {
+  const url = new URL(attendanceUrl)
+  url.searchParams.set('sourceEmployeeId', employeeId)
+  url.searchParams.set('startDate', formatDateInput(range.start))
+  url.searchParams.set('endDate', formatDateInput(range.end))
+
+  const response = await fetch(url.toString(), { signal })
+
+  if (!response.ok) {
+    throw new Error(`Không thể tải lịch chấm công (${response.status})`)
+  }
+
+  const data = (await response.json()) as AttendanceRecord[]
+  return Array.isArray(data) ? sortAttendanceRecords(data) : []
+}
+
+// Lưu ý: chữ ký chính xác của loader/validateSearch (tên field `signal`,
+// cách đọc `deps`, v.v.) có thể lệch đôi chút giữa các bản TanStack Router —
+// kiểm tra lại theo version đang dùng trong project nếu compiler báo lỗi type.
+export const Route = createFileRoute('/')({
+  validateSearch: (search: Record<string, unknown>): AttendanceSearch => ({
+    employeeId:
+      typeof search.employeeId === 'string' && search.employeeId
+        ? search.employeeId
+        : undefined,
+    month:
+      typeof search.month === 'string' && search.month
+        ? search.month
+        : undefined,
+  }),
+  loaderDeps: ({ search }) => ({
+    employeeId: search.employeeId,
+    month: search.month ?? getMonthInputValue(new Date()),
+  }),
+  loader: async ({ deps, signal }): Promise<AttendanceLoaderData> => {
+    let employees: Employee[] = []
+    let employeesError: string | null = null
+
+    try {
+      employees = await fetchEmployees(signal)
+    } catch (error) {
+      employeesError =
+        error instanceof Error
+          ? error.message
+          : 'Không thể tải danh sách nhân viên'
+    }
+
+    let faceInfo: FaceInfoResponse | null = null
+    let faceError: string | null = null
+    let attendanceRecords: AttendanceRecord[] = []
+    let attendanceError: string | null = null
+
+    if (deps.employeeId) {
+      try {
+        faceInfo = await fetchFaceInfo(deps.employeeId, signal)
+      } catch (error) {
+        faceError =
+          error instanceof Error
+            ? error.message
+            : 'Không thể tải thông tin nhân viên'
+      }
+
+      const range = getAttendanceRange(deps.month)
+
+      if (!range) {
+        attendanceError = 'Tháng đã chọn chưa tới, chưa có dữ liệu.'
+      } else {
+        try {
+          attendanceRecords = await fetchAttendance(
+            deps.employeeId,
+            range,
+            signal,
+          )
+        } catch (error) {
+          attendanceError =
+            error instanceof Error
+              ? error.message
+              : 'Không thể tải lịch chấm công'
+        }
+      }
+    }
+
+    return {
+      employees,
+      employeesError,
+      faceInfo,
+      faceError,
+      attendanceRecords,
+      attendanceError,
+    }
+  },
+  component: App,
+})
 
 function App() {
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [employeesLoading, setEmployeesLoading] = useState(true)
-  const [employeesError, setEmployeesError] = useState<string | null>(null)
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const router = useRouter()
+  const isPending = useRouterState({
+    select: (state) => state.status === 'pending',
+  })
+
+  const {
+    employees,
+    employeesError,
+    faceInfo,
+    faceError,
+    attendanceRecords,
+    attendanceError,
+  } = Route.useLoaderData()
+
   const [searchTerm, setSearchTerm] = useState('')
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState('')
-  const [faceInfo, setFaceInfo] = useState<FaceInfoResponse | null>(null)
-  const [faceLoading, setFaceLoading] = useState(false)
-  const [faceError, setFaceError] = useState<string | null>(null)
-  const [attendanceMonth, setAttendanceMonth] = useState(
-    getMonthInputValue(new Date()),
-  )
-  const [attendanceRecords, setAttendanceRecords] = useState<
-    AttendanceRecord[]
-  >([])
-  const [attendanceLoading, setAttendanceLoading] = useState(false)
-  const [attendanceError, setAttendanceError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const controller = new AbortController()
+  const selectedEmployeeId = search.employeeId ?? ''
+  const attendanceMonth = search.month ?? getMonthInputValue(new Date())
 
-    async function loadEmployees() {
-      try {
-        setEmployeesLoading(true)
-        setEmployeesError(null)
+  function handleSelectEmployee(employeeId: string) {
+    void navigate({
+      search: (prev) => ({ ...prev, employeeId }),
+    })
+  }
 
-        const response = await fetch(employeesUrl, {
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error(
-            `Không thể tải danh sách nhân viên (${response.status})`,
-          )
-        }
-
-        const data = (await response.json()) as Employee[]
-        setEmployees(Array.isArray(data) ? data : [])
-      } catch (error) {
-        if ((error as Error).name === 'AbortError') {
-          return
-        }
-
-        setEmployeesError(
-          error instanceof Error
-            ? error.message
-            : 'Không thể tải danh sách nhân viên',
-        )
-      } finally {
-        setEmployeesLoading(false)
-      }
-    }
-
-    void loadEmployees()
-
-    return () => {
-      controller.abort()
-    }
-  }, [])
-
-  // Chọn nhân viên xong thì tự động tải thông tin nhân viên,
-  // không cần bấm nút riêng nữa.
-  useEffect(() => {
-    setFaceInfo(null)
-    setFaceError(null)
-
-    if (!selectedEmployeeId) {
-      return
-    }
-
-    const controller = new AbortController()
-
-    async function loadFaceInfo() {
-      try {
-        setFaceLoading(true)
-        setFaceError(null)
-
-        const response = await fetch(
-          `${faceInfoUrl}?nhanvien=${encodeURIComponent(selectedEmployeeId)}`,
-          { signal: controller.signal },
-        )
-
-        if (!response.ok) {
-          throw new Error(
-            `Không thể tải thông tin nhân viên (${response.status})`,
-          )
-        }
-
-        const data = (await response.json()) as FaceInfoResponse
-        setFaceInfo(data)
-      } catch (error) {
-        if ((error as Error).name === 'AbortError') {
-          return
-        }
-
-        setFaceError(
-          error instanceof Error
-            ? error.message
-            : 'Không thể tải thông tin nhân viên',
-        )
-      } finally {
-        setFaceLoading(false)
-      }
-    }
-
-    void loadFaceInfo()
-
-    return () => {
-      controller.abort()
-    }
-  }, [selectedEmployeeId])
-
-  // Chọn nhân viên hoặc đổi tháng xong thì tự động tải lịch chấm công,
-  // không cần bấm nút riêng nữa. Chỉ tải đến hết ngày hôm nay trong tháng đó.
-  useEffect(() => {
-    setAttendanceRecords([])
-    setAttendanceError(null)
-
-    if (!selectedEmployeeId) {
-      return
-    }
-
-    const range = getAttendanceRange(attendanceMonth)
-
-    if (!range) {
-      setAttendanceError('Tháng đã chọn chưa tới, chưa có dữ liệu.')
-      return
-    }
-
-    const startDateInput = formatDateInput(range.start)
-    const endDateInput = formatDateInput(range.end)
-
-    const controller = new AbortController()
-
-    async function loadAttendance() {
-      try {
-        setAttendanceLoading(true)
-        setAttendanceError(null)
-
-        const url = new URL(attendanceUrl)
-        url.searchParams.set('sourceEmployeeId', selectedEmployeeId)
-        url.searchParams.set('startDate', startDateInput)
-        url.searchParams.set('endDate', endDateInput)
-
-        const response = await fetch(url.toString(), {
-          signal: controller.signal,
-        })
-
-        if (!response.ok) {
-          throw new Error(`Không thể tải lịch chấm công (${response.status})`)
-        }
-
-        const data = (await response.json()) as AttendanceRecord[]
-        setAttendanceRecords(
-          Array.isArray(data) ? sortAttendanceRecords(data) : [],
-        )
-      } catch (error) {
-        if ((error as Error).name === 'AbortError') {
-          return
-        }
-
-        setAttendanceError(
-          error instanceof Error
-            ? error.message
-            : 'Không thể tải lịch chấm công',
-        )
-      } finally {
-        setAttendanceLoading(false)
-      }
-    }
-
-    void loadAttendance()
-
-    return () => {
-      controller.abort()
-    }
-  }, [selectedEmployeeId, attendanceMonth])
+  function handleChangeMonth(month: string) {
+    void navigate({
+      search: (prev) => ({ ...prev, month }),
+    })
+  }
 
   function handleSearchTermChange(value: string) {
     setSearchTerm(value)
 
     if (value.trim() === '') {
-      setAttendanceMonth(getMonthInputValue(new Date()))
+      void navigate({
+        search: (prev) => ({ ...prev, month: undefined }),
+      })
     }
   }
 
   function handleClearSearch() {
     handleSearchTermChange('')
-    setSelectedEmployeeId('')
+    void navigate({
+      search: (prev) => ({ ...prev, employeeId: undefined }),
+    })
+  }
+
+  function handleReloadAttendance() {
+    void router.invalidate()
   }
 
   const filteredEmployees = useMemo(() => {
@@ -343,50 +350,6 @@ function App() {
     return sections
   }, [attendanceMonth, attendanceRecords])
 
-  async function handleReloadAttendance() {
-    if (!selectedEmployeeId) {
-      setAttendanceError('Hãy chọn một nhân viên trước.')
-      return
-    }
-
-    const range = getAttendanceRange(attendanceMonth)
-
-    if (!range) {
-      setAttendanceError('Tháng đã chọn chưa tới, chưa có dữ liệu.')
-      return
-    }
-
-    const startDateInput = formatDateInput(range.start)
-    const endDateInput = formatDateInput(range.end)
-
-    try {
-      setAttendanceLoading(true)
-      setAttendanceError(null)
-
-      const url = new URL(attendanceUrl)
-      url.searchParams.set('sourceEmployeeId', selectedEmployeeId)
-      url.searchParams.set('startDate', startDateInput)
-      url.searchParams.set('endDate', endDateInput)
-
-      const response = await fetch(url.toString())
-
-      if (!response.ok) {
-        throw new Error(`Không thể tải lịch chấm công (${response.status})`)
-      }
-
-      const data = (await response.json()) as AttendanceRecord[]
-      setAttendanceRecords(
-        Array.isArray(data) ? sortAttendanceRecords(data) : [],
-      )
-    } catch (error) {
-      setAttendanceError(
-        error instanceof Error ? error.message : 'Không thể tải lịch chấm công',
-      )
-    } finally {
-      setAttendanceLoading(false)
-    }
-  }
-
   return (
     <main className="demo-page demo-page-wide px-4 pb-10 pt-6 sm:pt-8">
       <section className="demo-panel relative overflow-hidden rounded-2xl border border-slate-300 bg-white px-5 py-6 shadow-sm sm:px-7 sm:py-8">
@@ -410,7 +373,7 @@ function App() {
             />
             <StatCard
               label="Trạng thái"
-              value={employeesLoading ? 'Đang tải' : 'Sẵn sàng'}
+              value={isPending ? 'Đang tải' : 'Sẵn sàng'}
             />
           </div>
         </div>
@@ -478,7 +441,7 @@ function App() {
                 title="Nhập từ khóa để tìm nhân viên"
                 description="Nhập mã NV, tên hoặc phòng ban vào ô tìm kiếm ở trên để hiển thị kết quả."
               />
-            ) : employeesLoading ? (
+            ) : isPending ? (
               <LoadingBlock label="Đang tải danh sách nhân viên..." />
             ) : filteredEmployees.length ? (
               filteredEmployees.map((employee) => {
@@ -488,7 +451,7 @@ function App() {
                   <button
                     key={employee.ma_nv}
                     type="button"
-                    onClick={() => setSelectedEmployeeId(employee.ma_nv)}
+                    onClick={() => handleSelectEmployee(employee.ma_nv)}
                     className={`w-full rounded-lg border px-4 py-3 text-left transition ${
                       isActive
                         ? 'border-blue-300 bg-blue-50 shadow-[0_0_0_1px_rgba(66,133,244,0.25)]'
@@ -546,7 +509,7 @@ function App() {
                 </p>
               </div>
 
-              {faceLoading ? (
+              {isPending && selectedEmployeeId ? (
                 <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
                   Đang tải thông tin...
                 </span>
@@ -635,7 +598,7 @@ function App() {
                   <input
                     type="month"
                     value={attendanceMonth}
-                    onChange={(event) => setAttendanceMonth(event.target.value)}
+                    onChange={(event) => handleChangeMonth(event.target.value)}
                     className="demo-input rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   />
                 </label>
@@ -643,10 +606,10 @@ function App() {
                   <button
                     type="button"
                     onClick={handleReloadAttendance}
-                    disabled={!selectedEmployeeId || attendanceLoading}
+                    disabled={!selectedEmployeeId || isPending}
                     className="w-full rounded-md border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {attendanceLoading ? 'Đang tải...' : 'Tải lại'}
+                    {isPending ? 'Đang tải...' : 'Tải lại'}
                   </button>
                 </div>
               </div>
