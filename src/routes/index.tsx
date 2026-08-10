@@ -27,6 +27,8 @@ type FaceInfoResponse = {
   IsApprover: boolean
 }
 
+type HighRadiusEmployee = Employee & { faceInfo: FaceInfoResponse }
+
 type AttendanceRecord = {
   WorkDate: string
   FirstCheckIn: string | null
@@ -54,6 +56,11 @@ const attendanceUrl =
 
 const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
+// Ngưỡng khoảng cách cho phép (m) để coi là "bất thường" khi quét toàn bộ nhân viên
+const HIGH_RADIUS_THRESHOLD = 1000
+// Số request gọi song song khi quét toàn bộ danh sách nhân viên
+const HIGH_RADIUS_SCAN_CONCURRENCY = 5
+
 async function fetchEmployees(signal?: AbortSignal): Promise<Employee[]> {
   const response = await fetch(employeesUrl, { signal })
 
@@ -75,9 +82,7 @@ async function fetchFaceInfo(
   )
 
   if (!response.ok) {
-    throw new Error(
-      `Không thể tải thông tin nhân viên (${response.status})`,
-    )
+    throw new Error(`Không thể tải thông tin nhân viên (${response.status})`)
   }
 
   return (await response.json()) as FaceInfoResponse
@@ -205,10 +210,23 @@ function App() {
 
   const [searchTerm, setSearchTerm] = useState('')
 
+  // --- Quét toàn bộ nhân viên để tìm ai có Khoảng cách cho phép > 1000m ---
+  const [highRadiusResults, setHighRadiusResults] = useState<
+    HighRadiusEmployee[] | null
+  >(null)
+  const [isScanningRadius, setIsScanningRadius] = useState(false)
+  const [radiusScanError, setRadiusScanError] = useState<string | null>(null)
+  const [radiusScanProgress, setRadiusScanProgress] = useState({
+    done: 0,
+    total: 0,
+  })
+  const [showHighRadiusView, setShowHighRadiusView] = useState(false)
+
   const selectedEmployeeId = search.employeeId ?? ''
   const attendanceMonth = search.month ?? getMonthInputValue(new Date())
 
   function handleSelectEmployee(employeeId: string) {
+    setShowHighRadiusView(false)
     void navigate({
       search: (prev) => ({ ...prev, employeeId }),
     })
@@ -239,6 +257,73 @@ function App() {
 
   function handleReloadAttendance() {
     void router.invalidate()
+  }
+
+  async function handleScanHighRadius() {
+    if (isScanningRadius || employees.length === 0) {
+      return
+    }
+
+    setIsScanningRadius(true)
+    setRadiusScanError(null)
+    setRadiusScanProgress({ done: 0, total: employees.length })
+    setShowHighRadiusView(true)
+
+    const flagged: HighRadiusEmployee[] = []
+    let cursorIndex = 0
+    let failedCount = 0
+
+    async function worker() {
+      while (cursorIndex < employees.length) {
+        const currentIndex = cursorIndex
+        cursorIndex += 1
+        const employee = employees[currentIndex]
+
+        try {
+          const info = await fetchFaceInfo(employee.ma_nv)
+
+          if (info.AllowedRadius > HIGH_RADIUS_THRESHOLD) {
+            flagged.push({ ...employee, faceInfo: info })
+          }
+        } catch {
+          // Bỏ qua lỗi của từng nhân viên riêng lẻ, không chặn cả quá trình quét
+          failedCount += 1
+        } finally {
+          setRadiusScanProgress((prev) => ({ ...prev, done: prev.done + 1 }))
+        }
+      }
+    }
+
+    try {
+      const workerCount = Math.min(
+        HIGH_RADIUS_SCAN_CONCURRENCY,
+        employees.length,
+      )
+      await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+      flagged.sort(
+        (a, b) => b.faceInfo.AllowedRadius - a.faceInfo.AllowedRadius,
+      )
+      setHighRadiusResults(flagged)
+
+      if (failedCount > 0) {
+        setRadiusScanError(
+          `Không lấy được dữ liệu của ${failedCount} nhân viên, kết quả có thể chưa đầy đủ.`,
+        )
+      }
+    } catch (error) {
+      setRadiusScanError(
+        error instanceof Error
+          ? error.message
+          : 'Không thể quét danh sách nhân viên',
+      )
+    } finally {
+      setIsScanningRadius(false)
+    }
+  }
+
+  function handleCloseHighRadiusView() {
+    setShowHighRadiusView(false)
   }
 
   const filteredEmployees = useMemo(() => {
@@ -382,6 +467,35 @@ function App() {
             />
           </div>
         </div>
+
+        <div className="relative mt-5 flex flex-wrap items-center gap-3 border-t border-slate-200 pt-5">
+          <button
+            type="button"
+            onClick={handleScanHighRadius}
+            disabled={isScanningRadius || employees.length === 0}
+            className="inline-flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-5 py-3 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 hover:cursor-pointer"
+          >
+            {isScanningRadius
+              ? `Đang quét ${radiusScanProgress.done}/${radiusScanProgress.total}...`
+              : `Kiểm tra khoảng cách cho phép > ${HIGH_RADIUS_THRESHOLD}m`}
+          </button>
+
+          {highRadiusResults ? (
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {highRadiusResults.length} nhân viên vượt ngưỡng
+            </span>
+          ) : null}
+
+          {showHighRadiusView ? (
+            <button
+              type="button"
+              onClick={handleCloseHighRadiusView}
+              className="ml-auto text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 underline-offset-2 hover:cursor-pointer hover:underline"
+            >
+              Đóng bảng kết quả
+            </button>
+          ) : null}
+        </div>
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
@@ -494,46 +608,148 @@ function App() {
           </div>
         </aside>
 
-        <section className="space-y-6">
-          <div className="demo-panel">
+        {showHighRadiusView ? (
+          <section className="demo-panel">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="demo-section-title text-lg text-slate-900">
-                  Thông tin nhân viên
+                  Nhân viên có khoảng cách cho phép &gt; {HIGH_RADIUS_THRESHOLD}
+                  m
                 </h2>
-                <p className="mt-1 text-sm">
-                  {selectedEmployee ? (
-                    <span className="font-semibold text-blue-700">
-                      {selectedEmployee.ten} - {selectedEmployee.phong}
-                    </span>
-                  ) : (
-                    <span className="text-slate-500">
-                      Hãy chọn một nhân viên để xem chi tiết.
-                    </span>
-                  )}
+                <p className="mt-1 text-sm text-slate-500">
+                  {isScanningRadius
+                    ? `Đang quét ${radiusScanProgress.done}/${radiusScanProgress.total} nhân viên...`
+                    : highRadiusResults
+                      ? `Tìm thấy ${highRadiusResults.length} nhân viên vượt ngưỡng.`
+                      : 'Chưa có kết quả.'}
                 </p>
               </div>
-
-              {isPending && selectedEmployeeId ? (
-                <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Đang tải thông tin...
-                </span>
-              ) : null}
+              <button
+                type="button"
+                onClick={handleCloseHighRadiusView}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:cursor-pointer"
+              >
+                Quay lại
+              </button>
             </div>
 
-            {faceError ? (
+            {radiusScanError ? (
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {faceError}
+                {radiusScanError}
               </div>
             ) : null}
 
-            {selectedEmployee ? (
-              <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <InfoCard
-                  label="ID"
-                  value={faceInfo?.id ?? selectedEmployee.ma_nv}
-                />
-                {/* <InfoCard
+            {isScanningRadius ? (
+              <LoadingBlock
+                label={`Đang kiểm tra từng nhân viên (${radiusScanProgress.done}/${radiusScanProgress.total})...`}
+              />
+            ) : highRadiusResults && highRadiusResults.length > 0 ? (
+              <div className="mt-5 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-700">
+                      <tr>
+                        <th className="px-4 py-3 font-semibold whitespace-nowrap">
+                          Mã NV
+                        </th>
+                        <th className="px-4 py-3 font-semibold">Tên</th>
+                        <th className="px-4 py-3 font-semibold">Phòng</th>
+                        <th className="px-4 py-3 font-semibold">
+                          Khoảng cách cho phép
+                        </th>
+                        <th className="px-4 py-3 font-semibold">Vị trí</th>
+                        <th className="px-4 py-3 font-semibold">
+                          Cho phép sửa
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {highRadiusResults.map((item) => (
+                        <tr
+                          key={item.ma_nv}
+                          className="cursor-pointer border-t border-slate-300 odd:bg-white even:bg-slate-50/70 hover:bg-amber-50"
+                          onClick={() => handleSelectEmployee(item.ma_nv)}
+                        >
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            {item.ma_nv}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-teal-700 whitespace-nowrap">
+                            {item.ten}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {item.phong}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
+                              {item.faceInfo.AllowedRadius.toLocaleString(
+                                'vi-VN',
+                              )}{' '}
+                              m
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {item.faceInfo.Latitude.toFixed(6)},{' '}
+                            {item.faceInfo.Longitude.toFixed(6)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {item.faceInfo.EnableEditAllowedRadius
+                              ? 'Có'
+                              : 'Không'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="Không có nhân viên nào vượt ngưỡng"
+                description={`Không tìm thấy nhân viên nào có khoảng cách cho phép trên ${HIGH_RADIUS_THRESHOLD}m.`}
+              />
+            )}
+          </section>
+        ) : (
+          <section className="space-y-6">
+            <div className="demo-panel">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h2 className="demo-section-title text-lg text-slate-900">
+                    Thông tin nhân viên
+                  </h2>
+                  <p className="mt-1 text-sm">
+                    {selectedEmployee ? (
+                      <span className="font-semibold text-blue-700">
+                        {selectedEmployee.ten} - {selectedEmployee.phong}
+                      </span>
+                    ) : (
+                      <span className="text-slate-500">
+                        Hãy chọn một nhân viên để xem chi tiết.
+                      </span>
+                    )}
+                  </p>
+                </div>
+
+                {isPending && selectedEmployeeId ? (
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Đang tải thông tin...
+                  </span>
+                ) : null}
+              </div>
+
+              {faceError ? (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {faceError}
+                </div>
+              ) : null}
+
+              {selectedEmployee ? (
+                <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <InfoCard
+                    label="ID"
+                    value={faceInfo?.id ?? selectedEmployee.ma_nv}
+                  />
+                  {/* <InfoCard
                   label="Tên nhân viên"
                   value={
                     faceInfo
@@ -541,31 +757,33 @@ function App() {
                       : selectedEmployee.ten
                   }
                 /> */}
-                <InfoCard
-                  label="Khoảng cách cho phép"
-                  value={
-                    faceInfo ? `${faceInfo.AllowedRadius} m` : 'Chưa có dữ liệu'
-                  }
-                />
-                <InfoCard
-                  label="Vị trí"
-                  value={
-                    faceInfo
-                      ? `${faceInfo.Latitude.toFixed(6)}, ${faceInfo.Longitude.toFixed(6)}`
-                      : 'Chưa có dữ liệu'
-                  }
-                />
-                <InfoCard
-                  label="Cho phép sửa khoảng cách"
-                  value={
-                    faceInfo
-                      ? faceInfo.EnableEditAllowedRadius
-                        ? 'Có'
-                        : 'Không'
-                      : 'Chưa có dữ liệu'
-                  }
-                />
-                {/* <InfoCard
+                  <InfoCard
+                    label="Khoảng cách cho phép"
+                    value={
+                      faceInfo
+                        ? `${faceInfo.AllowedRadius} m`
+                        : 'Chưa có dữ liệu'
+                    }
+                  />
+                  <InfoCard
+                    label="Vị trí"
+                    value={
+                      faceInfo
+                        ? `${faceInfo.Latitude.toFixed(6)}, ${faceInfo.Longitude.toFixed(6)}`
+                        : 'Chưa có dữ liệu'
+                    }
+                  />
+                  <InfoCard
+                    label="Cho phép sửa khoảng cách"
+                    value={
+                      faceInfo
+                        ? faceInfo.EnableEditAllowedRadius
+                          ? 'Có'
+                          : 'Không'
+                        : 'Chưa có dữ liệu'
+                    }
+                  />
+                  {/* <InfoCard
                   label="Đi công tác / Phê duyệt"
                   value={
                     faceInfo
@@ -573,192 +791,195 @@ function App() {
                       : 'Chưa có dữ liệu'
                   }
                 /> */}
-              </div>
-            ) : (
-              <EmptyState
-                title="Chưa chọn nhân viên"
-                description="Bấm vào một nhân viên trong danh sách bên trái để xem thông tin và lịch chấm công."
-              />
-            )}
-          </div>
-
-          <div className="demo-panel">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h2 className="demo-section-title text-lg text-slate-900">
-                  Lịch chấm công
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {selectedEmployee
-                    ? 'Chọn tháng rồi tải dữ liệu chấm công tương ứng.'
-                    : 'Cần chọn nhân viên trước khi xem dữ liệu chấm công.'}
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label>
-                  <span className="mb-2 block text-sm font-semibold text-slate-700">
-                    Tháng
-                  </span>
-                  <input
-                    type="month"
-                    value={attendanceMonth}
-                    onChange={(event) => handleChangeMonth(event.target.value)}
-                    className="demo-input rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-                <div className="flex items-end">
-                  <button
-                    type="button"
-                    onClick={handleReloadAttendance}
-                    disabled={!selectedEmployeeId || isPending}
-                    className="w-full rounded-md border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isPending ? 'Đang tải...' : 'Tải lại'}
-                  </button>
                 </div>
-              </div>
+              ) : (
+                <EmptyState
+                  title="Chưa chọn nhân viên"
+                  description="Bấm vào một nhân viên trong danh sách bên trái để xem thông tin và lịch chấm công."
+                />
+              )}
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <SummaryStat
-                label="Ngày đi làm ngày thường"
-                value={`${attendanceStats.weekdayWorkedDays}/${attendanceStats.totalWeekdaysInMonth}`}
-                // hint="Số ngày có workdate trên tổng số ngày làm việc trong tháng"
-              />
-              <SummaryStat
-                label="Ngày đi làm cuối tuần"
-                value={`${attendanceStats.weekendWorkedDays}/${attendanceStats.totalWeekendDaysInMonth}`}
-                // hint="Số ngày có workdate trên tổng số ngày Thứ bảy và Chủ nhật trong tháng"
-              />
-              <SummaryStat
-                label="Ngày đi muộn"
-                value={String(attendanceStats.lateDays)}
-                // hint="FirstCheckIn sau 07:30, chỉ tính ngày thường"
-              />
-              <SummaryStat
-                label="Ngày về sau 18h"
-                value={String(attendanceStats.lateCheckoutDays)}
-                // hint="LastCheckOut sau 18:00, chỉ tính ngày thường"
-              />
-              {/* <SummaryStat
+            <div className="demo-panel">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <h2 className="demo-section-title text-lg text-slate-900">
+                    Lịch chấm công
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {selectedEmployee
+                      ? 'Chọn tháng rồi tải dữ liệu chấm công tương ứng.'
+                      : 'Cần chọn nhân viên trước khi xem dữ liệu chấm công.'}
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label>
+                    <span className="mb-2 block text-sm font-semibold text-slate-700">
+                      Tháng
+                    </span>
+                    <input
+                      type="month"
+                      value={attendanceMonth}
+                      onChange={(event) =>
+                        handleChangeMonth(event.target.value)
+                      }
+                      className="demo-input rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={handleReloadAttendance}
+                      disabled={!selectedEmployeeId || isPending}
+                      className="w-full rounded-md border border-blue-200 bg-blue-50 px-5 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isPending ? 'Đang tải...' : 'Tải lại'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <SummaryStat
+                  label="Ngày đi làm ngày thường"
+                  value={`${attendanceStats.weekdayWorkedDays}/${attendanceStats.totalWeekdaysInMonth}`}
+                  // hint="Số ngày có workdate trên tổng số ngày làm việc trong tháng"
+                />
+                <SummaryStat
+                  label="Ngày đi làm cuối tuần"
+                  value={`${attendanceStats.weekendWorkedDays}/${attendanceStats.totalWeekendDaysInMonth}`}
+                  // hint="Số ngày có workdate trên tổng số ngày Thứ bảy và Chủ nhật trong tháng"
+                />
+                <SummaryStat
+                  label="Ngày đi muộn"
+                  value={String(attendanceStats.lateDays)}
+                  // hint="FirstCheckIn sau 07:30, chỉ tính ngày thường"
+                />
+                <SummaryStat
+                  label="Ngày về sau 18h"
+                  value={String(attendanceStats.lateCheckoutDays)}
+                  // hint="LastCheckOut sau 18:00, chỉ tính ngày thường"
+                />
+                {/* <SummaryStat
                 label="Tháng"
                 value={formatMonthLabel(attendanceMonth).replace('Tháng ', '')}
                 // hint="Dữ liệu đang hiển thị"
               /> */}
-            </div>
-
-            {attendanceError ? (
-              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {attendanceError}
               </div>
-            ) : null}
 
-            {selectedEmployee ? (
-              <div className="mt-5">
-                {attendanceSections.length ? (
-                  <div className="space-y-6">
-                    {attendanceSections.map((section) => (
-                      <section key={section.monthKey}>
-                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                          <h3 className="m-0 text-base font-bold text-red-800 uppercase">
-                            {section.title}
-                          </h3>
-                          <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-red-800">
-                            {section.items.length} ngày
-                          </p>
-                        </div>
+              {attendanceError ? (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {attendanceError}
+                </div>
+              ) : null}
 
-                        <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xs">
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full border-collapse text-left text-sm">
-                              <thead className="bg-slate-50 text-slate-700">
-                                <tr>
-                                  <th className="px-4 py-3 font-semibold">
-                                    Ngày
-                                  </th>
-                                  <th className="px-4 py-3 font-semibold">
-                                    Thứ
-                                  </th>
-                                  <th className="px-4 py-3 font-semibold">
-                                    Chấm công vào
-                                  </th>
-                                  <th className="px-4 py-3 font-semibold">
-                                    Chấm công ra
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {section.items.map((item) => (
-                                  <tr
-                                    key={item.date}
-                                    className={`border-t border-slate-300 ${
-                                      item.isWeekend
-                                        ? 'bg-red-50/60'
-                                        : 'odd:bg-white even:bg-slate-50/70'
-                                    }`}
-                                  >
-                                    <td className="px-4 py-3 font-semibold text-slate-900">
-                                      {formatDayMonth(item.date)}
-                                    </td>
-                                    <td
-                                      className={`px-4 py-3 font-semibold ${
+              {selectedEmployee ? (
+                <div className="mt-5">
+                  {attendanceSections.length ? (
+                    <div className="space-y-6">
+                      {attendanceSections.map((section) => (
+                        <section key={section.monthKey}>
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                            <h3 className="m-0 text-base font-bold text-red-800 uppercase">
+                              {section.title}
+                            </h3>
+                            <p className="m-0 text-xs font-semibold uppercase tracking-[0.16em] text-red-800">
+                              {section.items.length} ngày
+                            </p>
+                          </div>
+
+                          <div className="overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xs">
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full border-collapse text-left text-sm">
+                                <thead className="bg-slate-50 text-slate-700">
+                                  <tr>
+                                    <th className="px-4 py-3 font-semibold">
+                                      Ngày
+                                    </th>
+                                    <th className="px-4 py-3 font-semibold">
+                                      Thứ
+                                    </th>
+                                    <th className="px-4 py-3 font-semibold">
+                                      Chấm công vào
+                                    </th>
+                                    <th className="px-4 py-3 font-semibold">
+                                      Chấm công ra
+                                    </th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {section.items.map((item) => (
+                                    <tr
+                                      key={item.date}
+                                      className={`border-t border-slate-300 ${
                                         item.isWeekend
-                                          ? 'text-red-600'
-                                          : 'text-slate-500'
+                                          ? 'bg-red-50/60'
+                                          : 'odd:bg-white even:bg-slate-50/70'
                                       }`}
                                     >
-                                      {item.weekday}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <AttendanceValue
-                                        value={item.record?.FirstCheckIn}
-                                        isLate={
-                                          !item.isWeekend &&
-                                          isAfterCutoff(
-                                            item.record?.FirstCheckIn,
-                                            '07:30:00',
-                                          )
-                                        }
-                                      />
-                                    </td>
-                                    <td className="px-4 py-3">
-                                      <AttendanceValue
-                                        value={item.record?.LastCheckOut}
-                                        isLate={
-                                          !item.isWeekend &&
-                                          isAfterCutoff(
-                                            item.record?.LastCheckOut,
-                                            '18:00:00',
-                                          )
-                                        }
-                                        lateVariant="positive"
-                                      />
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                      <td className="px-4 py-3 font-semibold text-slate-900">
+                                        {formatDayMonth(item.date)}
+                                      </td>
+                                      <td
+                                        className={`px-4 py-3 font-semibold ${
+                                          item.isWeekend
+                                            ? 'text-red-600'
+                                            : 'text-slate-500'
+                                        }`}
+                                      >
+                                        {item.weekday}
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <AttendanceValue
+                                          value={item.record?.FirstCheckIn}
+                                          isLate={
+                                            !item.isWeekend &&
+                                            isAfterCutoff(
+                                              item.record?.FirstCheckIn,
+                                              '07:30:00',
+                                            )
+                                          }
+                                        />
+                                      </td>
+                                      <td className="px-4 py-3">
+                                        <AttendanceValue
+                                          value={item.record?.LastCheckOut}
+                                          isLate={
+                                            !item.isWeekend &&
+                                            isAfterCutoff(
+                                              item.record?.LastCheckOut,
+                                              '18:00:00',
+                                            )
+                                          }
+                                          lateVariant="positive"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <EmptyState
-                    title="Chưa có dữ liệu chấm công"
-                    description="Chưa có ngày nào tính đến hôm nay trong tháng đã chọn, hoặc chưa có dữ liệu được ghi nhận."
-                  />
-                )}
-              </div>
-            ) : (
-              <EmptyState
-                title="Chưa chọn nhân viên"
-                description="Chọn nhân viên để xem lịch chấm công theo ngày."
-              />
-            )}
-          </div>
-        </section>
+                        </section>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="Chưa có dữ liệu chấm công"
+                      description="Chưa có ngày nào tính đến hôm nay trong tháng đã chọn, hoặc chưa có dữ liệu được ghi nhận."
+                    />
+                  )}
+                </div>
+              ) : (
+                <EmptyState
+                  title="Chưa chọn nhân viên"
+                  description="Chọn nhân viên để xem lịch chấm công theo ngày."
+                />
+              )}
+            </div>
+          </section>
+        )}
       </section>
     </main>
   )
