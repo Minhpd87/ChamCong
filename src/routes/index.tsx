@@ -35,6 +35,8 @@ type AttendanceRecord = {
   LastCheckOut: string | null
 }
 
+type CheckedInOutEmployee = Employee & { record: AttendanceRecord }
+
 type AttendanceSearch = {
   employeeId?: string
   month?: string
@@ -49,6 +51,10 @@ type AttendanceLoaderData = {
   attendanceError: string | null
 }
 
+// Panel hiển thị ở khu vực bên phải: chi tiết nhân viên, kết quả quét bán
+// kính, hoặc kết quả quét chấm công vào/ra trong ngày.
+type ActivePanel = 'detail' | 'highRadius' | 'checkedInOut'
+
 const employeesUrl = new URL('../../nhanvien.json', import.meta.url).href
 const faceInfoUrl = 'https://chamcong.haiphong.gov.vn/api/LAY_FACEID'
 const attendanceUrl =
@@ -59,7 +65,7 @@ const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 // Ngưỡng khoảng cách cho phép (m) để coi là "bất thường" khi quét toàn bộ nhân viên
 const HIGH_RADIUS_THRESHOLD = 1000
 // Số request gọi song song khi quét toàn bộ danh sách nhân viên
-const HIGH_RADIUS_SCAN_CONCURRENCY = 5
+const EMPLOYEE_SCAN_CONCURRENCY = 5
 
 async function fetchEmployees(signal?: AbortSignal): Promise<Employee[]> {
   const response = await fetch(employeesUrl, { signal })
@@ -82,7 +88,9 @@ async function fetchFaceInfo(
   )
 
   if (!response.ok) {
-    throw new Error(`Không thể tải thông tin nhân viên (${response.status})`)
+    throw new Error(
+      `Không thể tải thông tin nhân viên (${response.status})`,
+    )
   }
 
   return (await response.json()) as FaceInfoResponse
@@ -106,6 +114,46 @@ async function fetchAttendance(
 
   const data = (await response.json()) as AttendanceRecord[]
   return Array.isArray(data) ? sortAttendanceRecords(data) : []
+}
+
+// Chạy `task` cho toàn bộ danh sách nhân viên với số lượng request song song
+// giới hạn ở `concurrency`. Lỗi của từng nhân viên riêng lẻ không chặn cả quá
+// trình quét — chỉ được đếm lại trong `failedCount`. `onProgress` được gọi
+// sau mỗi nhân viên (thành công hoặc lỗi) để cập nhật thanh tiến trình.
+async function scanEmployeesWithConcurrency<T>(
+  employees: Employee[],
+  concurrency: number,
+  task: (employee: Employee) => Promise<T | null>,
+  onProgress: () => void,
+): Promise<{ results: T[]; failedCount: number }> {
+  const results: T[] = []
+  let cursorIndex = 0
+  let failedCount = 0
+
+  async function worker() {
+    while (cursorIndex < employees.length) {
+      const currentIndex = cursorIndex
+      cursorIndex += 1
+      const employee = employees[currentIndex]
+
+      try {
+        const result = await task(employee)
+
+        if (result) {
+          results.push(result)
+        }
+      } catch {
+        failedCount += 1
+      } finally {
+        onProgress()
+      }
+    }
+  }
+
+  const workerCount = Math.min(concurrency, employees.length)
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+
+  return { results, failedCount }
 }
 
 // Lưu ý: chữ ký chính xác của loader/validateSearch (tên field `signal`,
@@ -210,6 +258,9 @@ function App() {
 
   const [searchTerm, setSearchTerm] = useState('')
 
+  // Panel nào đang hiển thị ở khu vực bên phải
+  const [activePanel, setActivePanel] = useState<ActivePanel>('detail')
+
   // --- Quét toàn bộ nhân viên để tìm ai có Khoảng cách cho phép > 1000m ---
   const [highRadiusResults, setHighRadiusResults] = useState<
     HighRadiusEmployee[] | null
@@ -220,13 +271,25 @@ function App() {
     done: 0,
     total: 0,
   })
-  const [showHighRadiusView, setShowHighRadiusView] = useState(false)
+
+  // --- Quét toàn bộ nhân viên để tìm ai đã chấm công vào & ra hôm nay ---
+  const [checkedInOutResults, setCheckedInOutResults] = useState<
+    CheckedInOutEmployee[] | null
+  >(null)
+  const [isScanningCheckedInOut, setIsScanningCheckedInOut] = useState(false)
+  const [checkedInOutError, setCheckedInOutError] = useState<string | null>(
+    null,
+  )
+  const [checkedInOutProgress, setCheckedInOutProgress] = useState({
+    done: 0,
+    total: 0,
+  })
 
   const selectedEmployeeId = search.employeeId ?? ''
   const attendanceMonth = search.month ?? getMonthInputValue(new Date())
 
   function handleSelectEmployee(employeeId: string) {
-    setShowHighRadiusView(false)
+    setActivePanel('detail')
     void navigate({
       search: (prev) => ({ ...prev, employeeId }),
     })
@@ -259,6 +322,10 @@ function App() {
     void router.invalidate()
   }
 
+  function handleClosePanel() {
+    setActivePanel('detail')
+  }
+
   async function handleScanHighRadius() {
     if (isScanningRadius || employees.length === 0) {
       return
@@ -267,44 +334,29 @@ function App() {
     setIsScanningRadius(true)
     setRadiusScanError(null)
     setRadiusScanProgress({ done: 0, total: employees.length })
-    setShowHighRadiusView(true)
+    setActivePanel('highRadius')
 
-    const flagged: HighRadiusEmployee[] = []
-    let cursorIndex = 0
-    let failedCount = 0
-
-    async function worker() {
-      while (cursorIndex < employees.length) {
-        const currentIndex = cursorIndex
-        cursorIndex += 1
-        const employee = employees[currentIndex]
-
-        try {
+    try {
+      const { results, failedCount } = await scanEmployeesWithConcurrency(
+        employees,
+        EMPLOYEE_SCAN_CONCURRENCY,
+        async (employee) => {
           const info = await fetchFaceInfo(employee.ma_nv)
 
           if (info.AllowedRadius > HIGH_RADIUS_THRESHOLD) {
-            flagged.push({ ...employee, faceInfo: info })
+            return { ...employee, faceInfo: info }
           }
-        } catch {
-          // Bỏ qua lỗi của từng nhân viên riêng lẻ, không chặn cả quá trình quét
-          failedCount += 1
-        } finally {
-          setRadiusScanProgress((prev) => ({ ...prev, done: prev.done + 1 }))
-        }
-      }
-    }
 
-    try {
-      const workerCount = Math.min(
-        HIGH_RADIUS_SCAN_CONCURRENCY,
-        employees.length,
+          return null
+        },
+        () =>
+          setRadiusScanProgress((prev) => ({ ...prev, done: prev.done + 1 })),
       )
-      await Promise.all(Array.from({ length: workerCount }, () => worker()))
 
-      flagged.sort(
+      results.sort(
         (a, b) => b.faceInfo.AllowedRadius - a.faceInfo.AllowedRadius,
       )
-      setHighRadiusResults(flagged)
+      setHighRadiusResults(results)
 
       if (failedCount > 0) {
         setRadiusScanError(
@@ -322,8 +374,63 @@ function App() {
     }
   }
 
-  function handleCloseHighRadiusView() {
-    setShowHighRadiusView(false)
+  async function handleScanCheckedInOut() {
+    if (isScanningCheckedInOut || employees.length === 0) {
+      return
+    }
+
+    setIsScanningCheckedInOut(true)
+    setCheckedInOutError(null)
+    setCheckedInOutProgress({ done: 0, total: employees.length })
+    setActivePanel('checkedInOut')
+
+    const today = new Date()
+    const todayValue = formatDateInput(today)
+
+    try {
+      const { results, failedCount } = await scanEmployeesWithConcurrency(
+        employees,
+        EMPLOYEE_SCAN_CONCURRENCY,
+        async (employee) => {
+          const records = await fetchAttendance(employee.ma_nv, {
+            start: today,
+            end: today,
+          })
+          const record =
+            records.find((item) => item.WorkDate === todayValue) ??
+            records[0] ??
+            null
+
+          if (record && record.FirstCheckIn && record.LastCheckOut) {
+            return { ...employee, record }
+          }
+
+          return null
+        },
+        () =>
+          setCheckedInOutProgress((prev) => ({
+            ...prev,
+            done: prev.done + 1,
+          })),
+      )
+
+      results.sort((a, b) => a.ten.localeCompare(b.ten, 'vi'))
+      setCheckedInOutResults(results)
+
+      if (failedCount > 0) {
+        setCheckedInOutError(
+          `Không lấy được dữ liệu của ${failedCount} nhân viên, kết quả có thể chưa đầy đủ.`,
+        )
+      }
+    } catch (error) {
+      setCheckedInOutError(
+        error instanceof Error
+          ? error.message
+          : 'Không thể quét danh sách nhân viên',
+      )
+    } finally {
+      setIsScanningCheckedInOut(false)
+    }
   }
 
   const filteredEmployees = useMemo(() => {
@@ -480,16 +587,33 @@ function App() {
               : `Kiểm tra khoảng cách cho phép > ${HIGH_RADIUS_THRESHOLD}m`}
           </button>
 
-          {highRadiusResults ? (
+          <button
+            type="button"
+            onClick={handleScanCheckedInOut}
+            disabled={isScanningCheckedInOut || employees.length === 0}
+            className="inline-flex items-center gap-2 rounded-md border border-teal-300 bg-teal-50 px-5 py-3 text-sm font-semibold text-teal-800 transition hover:bg-teal-100 disabled:cursor-not-allowed disabled:opacity-50 hover:cursor-pointer"
+          >
+            {isScanningCheckedInOut
+              ? `Đang quét ${checkedInOutProgress.done}/${checkedInOutProgress.total}...`
+              : 'Kiểm tra người đã chấm công vào & ra hôm nay'}
+          </button>
+
+          {activePanel === 'highRadius' && highRadiusResults ? (
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               {highRadiusResults.length} nhân viên vượt ngưỡng
             </span>
           ) : null}
 
-          {showHighRadiusView ? (
+          {activePanel === 'checkedInOut' && checkedInOutResults ? (
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {checkedInOutResults.length} nhân viên đã chấm công đủ
+            </span>
+          ) : null}
+
+          {activePanel !== 'detail' ? (
             <button
               type="button"
-              onClick={handleCloseHighRadiusView}
+              onClick={handleClosePanel}
               className="ml-auto text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 underline-offset-2 hover:cursor-pointer hover:underline"
             >
               Đóng bảng kết quả
@@ -608,13 +732,12 @@ function App() {
           </div>
         </aside>
 
-        {showHighRadiusView ? (
+        {activePanel === 'highRadius' ? (
           <section className="demo-panel">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="demo-section-title text-lg text-slate-900">
-                  Nhân viên có khoảng cách cho phép &gt; {HIGH_RADIUS_THRESHOLD}
-                  m
+                  Nhân viên có khoảng cách cho phép &gt; {HIGH_RADIUS_THRESHOLD}m
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {isScanningRadius
@@ -626,7 +749,7 @@ function App() {
               </div>
               <button
                 type="button"
-                onClick={handleCloseHighRadiusView}
+                onClick={handleClosePanel}
                 className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:cursor-pointer"
               >
                 Quay lại
@@ -649,7 +772,7 @@ function App() {
                   <table className="min-w-full border-collapse text-left text-sm">
                     <thead className="bg-slate-50 text-slate-700">
                       <tr>
-                        <th className="px-4 py-3 font-semibold whitespace-nowrap">
+                        <th className="whitespace-nowrap px-4 py-3 font-semibold">
                           Mã NV
                         </th>
                         <th className="px-4 py-3 font-semibold">Tên</th>
@@ -670,10 +793,10 @@ function App() {
                           className="cursor-pointer border-t border-slate-300 odd:bg-white even:bg-slate-50/70 hover:bg-amber-50"
                           onClick={() => handleSelectEmployee(item.ma_nv)}
                         >
-                          <td className="px-4 py-3 font-semibold text-slate-900">
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
                             {item.ma_nv}
                           </td>
-                          <td className="px-4 py-3 font-semibold text-teal-700 whitespace-nowrap">
+                          <td className="px-4 py-3 font-semibold text-teal-700">
                             {item.ten}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
@@ -681,10 +804,7 @@ function App() {
                           </td>
                           <td className="px-4 py-3">
                             <span className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-bold text-amber-800">
-                              {item.faceInfo.AllowedRadius.toLocaleString(
-                                'vi-VN',
-                              )}{' '}
-                              m
+                              {formatMeters(item.faceInfo.AllowedRadius)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-600">
@@ -706,6 +826,98 @@ function App() {
               <EmptyState
                 title="Không có nhân viên nào vượt ngưỡng"
                 description={`Không tìm thấy nhân viên nào có khoảng cách cho phép trên ${HIGH_RADIUS_THRESHOLD}m.`}
+              />
+            )}
+          </section>
+        ) : activePanel === 'checkedInOut' ? (
+          <section className="demo-panel">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="demo-section-title text-lg text-slate-900">
+                  Nhân viên đã chấm công vào & ra hôm nay
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {isScanningCheckedInOut
+                    ? `Đang quét ${checkedInOutProgress.done}/${checkedInOutProgress.total} nhân viên...`
+                    : checkedInOutResults
+                      ? `Tìm thấy ${checkedInOutResults.length} nhân viên đã chấm công đủ cả vào và ra.`
+                      : 'Chưa có kết quả.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleClosePanel}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 hover:cursor-pointer"
+              >
+                Quay lại
+              </button>
+            </div>
+
+            {checkedInOutError ? (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {checkedInOutError}
+              </div>
+            ) : null}
+
+            {isScanningCheckedInOut ? (
+              <LoadingBlock
+                label={`Đang kiểm tra từng nhân viên (${checkedInOutProgress.done}/${checkedInOutProgress.total})...`}
+              />
+            ) : checkedInOutResults && checkedInOutResults.length > 0 ? (
+              <div className="mt-5 overflow-hidden rounded-xl border border-slate-300 bg-white shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-700">
+                      <tr>
+                        <th className="whitespace-nowrap px-4 py-3 font-semibold">
+                          Mã NV
+                        </th>
+                        <th className="px-4 py-3 font-semibold">Tên</th>
+                        <th className="px-4 py-3 font-semibold">Phòng</th>
+                        <th className="px-4 py-3 font-semibold">
+                          Chấm công vào
+                        </th>
+                        <th className="px-4 py-3 font-semibold">
+                          Chấm công ra
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checkedInOutResults.map((item) => (
+                        <tr
+                          key={item.ma_nv}
+                          className="cursor-pointer border-t border-slate-300 odd:bg-white even:bg-slate-50/70 hover:bg-teal-50"
+                          onClick={() => handleSelectEmployee(item.ma_nv)}
+                        >
+                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
+                            {item.ma_nv}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-teal-700">
+                            {item.ten}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {item.phong}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="rounded-md border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
+                              {item.record.FirstCheckIn}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="rounded-md border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
+                              {item.record.LastCheckOut}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <EmptyState
+                title="Chưa có ai chấm công đủ vào và ra"
+                description="Chưa tìm thấy nhân viên nào có cả dữ liệu chấm công vào và ra trong hôm nay."
               />
             )}
           </section>
@@ -761,7 +973,7 @@ function App() {
                     label="Khoảng cách cho phép"
                     value={
                       faceInfo
-                        ? `${faceInfo.AllowedRadius} m`
+                        ? formatMeters(faceInfo.AllowedRadius)
                         : 'Chưa có dữ liệu'
                     }
                   />
@@ -1123,6 +1335,12 @@ function formatDayMonth(dateValue: string) {
 
 function formatHHMM(timeValue: string) {
   return timeValue.split(':').slice(0, 2).join(':')
+}
+
+// Định dạng số mét theo kiểu Việt Nam, dùng dấu chấm phân cách hàng nghìn:
+// 1000 -> "1.000m", 50000 -> "50.000m"
+function formatMeters(meters: number) {
+  return `${meters.toLocaleString('vi-VN')}m`
 }
 
 function getMonthInputValue(date: Date) {
