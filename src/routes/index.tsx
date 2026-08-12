@@ -35,7 +35,7 @@ type AttendanceRecord = {
   LastCheckOut: string | null
 }
 
-type CheckedInOutEmployee = Employee & { record: AttendanceRecord }
+type CheckedInOutEmployee = Employee & { record: AttendanceRecord | null }
 
 type AttendanceSearch = {
   employeeId?: string
@@ -392,20 +392,23 @@ function App() {
         employees,
         EMPLOYEE_SCAN_CONCURRENCY,
         async (employee) => {
-          const records = await fetchAttendance(employee.ma_nv, {
-            start: today,
-            end: today,
-          })
-          const record =
-            records.find((item) => item.WorkDate === todayValue) ??
-            records[0] ??
-            null
+          try {
+            const records = await fetchAttendance(employee.ma_nv, {
+              start: today,
+              end: today,
+            })
+            const record =
+              records.find((item) => item.WorkDate === todayValue) ??
+              records[0] ??
+              null
 
-          if (record && record.FirstCheckIn && record.LastCheckOut) {
+            // Luôn trả về nhân viên dù có/chưa có dữ liệu chấm công, để danh
+            // sách hiển thị đầy đủ tất cả nhân viên chứ không chỉ người đã
+            // chấm công xong.
             return { ...employee, record }
+          } catch {
+            return { ...employee, record: null }
           }
-
-          return null
         },
         () =>
           setCheckedInOutProgress((prev) => ({
@@ -414,7 +417,19 @@ function App() {
           })),
       )
 
-      results.sort((a, b) => a.ten.localeCompare(b.ten, 'vi'))
+      // Sắp xếp: chưa chấm công / mới chấm công vào lên trước để dễ theo
+      // dõi ai còn thiếu dữ liệu, sau đó xếp theo tên.
+      results.sort((a, b) => {
+        const priorityDiff =
+          getAttendanceStatusPriority(a.record) -
+          getAttendanceStatusPriority(b.record)
+
+        if (priorityDiff !== 0) {
+          return priorityDiff
+        }
+
+        return a.ten.localeCompare(b.ten, 'vi')
+      })
       setCheckedInOutResults(results)
 
       if (failedCount > 0) {
@@ -595,7 +610,7 @@ function App() {
           >
             {isScanningCheckedInOut
               ? `Đang quét ${checkedInOutProgress.done}/${checkedInOutProgress.total}...`
-              : 'Kiểm tra người đã chấm công vào & ra hôm nay'}
+              : 'Xem tình trạng chấm công hôm nay'}
           </button>
 
           {activePanel === 'highRadius' && highRadiusResults ? (
@@ -606,7 +621,12 @@ function App() {
 
           {activePanel === 'checkedInOut' && checkedInOutResults ? (
             <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              {checkedInOutResults.length} nhân viên đã chấm công đủ
+              {
+                checkedInOutResults.filter(
+                  (item) => getAttendanceStatusPriority(item.record) === 2,
+                ).length
+              }
+              /{checkedInOutResults.length} đã chấm công đủ
             </span>
           ) : null}
 
@@ -834,13 +854,13 @@ function App() {
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div>
                 <h2 className="demo-section-title text-lg text-slate-900">
-                  Nhân viên đã chấm công vào & ra hôm nay
+                  Tình trạng chấm công hôm nay
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {isScanningCheckedInOut
                     ? `Đang quét ${checkedInOutProgress.done}/${checkedInOutProgress.total} nhân viên...`
                     : checkedInOutResults
-                      ? `Tìm thấy ${checkedInOutResults.length} nhân viên đã chấm công đủ cả vào và ra.`
+                      ? `${checkedInOutResults.length} nhân viên — bao gồm cả người chưa chấm công.`
                       : 'Chưa có kết quả.'}
                 </p>
               </div>
@@ -875,6 +895,9 @@ function App() {
                         <th className="px-4 py-3 font-semibold">Tên</th>
                         <th className="px-4 py-3 font-semibold">Phòng</th>
                         <th className="px-4 py-3 font-semibold">
+                          Trạng thái
+                        </th>
+                        <th className="px-4 py-3 font-semibold">
                           Chấm công vào
                         </th>
                         <th className="px-4 py-3 font-semibold">
@@ -883,41 +906,62 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {checkedInOutResults.map((item) => (
-                        <tr
-                          key={item.ma_nv}
-                          className="cursor-pointer border-t border-slate-300 odd:bg-white even:bg-slate-50/70 hover:bg-teal-50"
-                          onClick={() => handleSelectEmployee(item.ma_nv)}
-                        >
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
-                            {item.ma_nv}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-teal-700">
-                            {item.ten}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {item.phong}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="rounded-md border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
-                              {item.record.FirstCheckIn}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="rounded-md border border-green-200 bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
-                              {item.record.LastCheckOut}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {checkedInOutResults.map((item) => {
+                        const statusPriority = getAttendanceStatusPriority(
+                          item.record,
+                        )
+                        const statusBadgeClasses =
+                          statusPriority === 2
+                            ? 'border-green-200 bg-green-50 text-green-700'
+                            : statusPriority === 1
+                              ? 'border-amber-300 bg-amber-50 text-amber-800'
+                              : 'border-slate-300 bg-slate-100 text-slate-500'
+
+                        return (
+                          <tr
+                            key={item.ma_nv}
+                            className="cursor-pointer border-t border-slate-300 odd:bg-white even:bg-slate-50/70 hover:bg-teal-50"
+                            onClick={() => handleSelectEmployee(item.ma_nv)}
+                          >
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
+                              {item.ma_nv}
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-teal-700">
+                              {item.ten}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {item.phong}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-bold ${statusBadgeClasses}`}
+                              >
+                                {getAttendanceStatusLabel(item.record)}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <AttendanceValue
+                                value={item.record?.FirstCheckIn}
+                                isLate={false}
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <AttendanceValue
+                                value={item.record?.LastCheckOut}
+                                isLate={false}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
             ) : (
               <EmptyState
-                title="Chưa có ai chấm công đủ vào và ra"
-                description="Chưa tìm thấy nhân viên nào có cả dữ liệu chấm công vào và ra trong hôm nay."
+                title="Chưa có dữ liệu"
+                description="Không tìm thấy nhân viên nào để hiển thị tình trạng chấm công."
               />
             )}
           </section>
@@ -1341,6 +1385,32 @@ function formatHHMM(timeValue: string) {
 // 1000 -> "1.000m", 50000 -> "50.000m"
 function formatMeters(meters: number) {
   return `${meters.toLocaleString('vi-VN')}m`
+}
+
+// Thứ tự ưu tiên hiển thị trong bảng tình trạng chấm công hôm nay:
+// 0 = chưa chấm công vào, 1 = đã vào nhưng chưa ra, 2 = đã chấm công đủ.
+function getAttendanceStatusPriority(record: AttendanceRecord | null) {
+  if (!record || !record.FirstCheckIn) {
+    return 0
+  }
+
+  if (!record.LastCheckOut) {
+    return 1
+  }
+
+  return 2
+}
+
+function getAttendanceStatusLabel(record: AttendanceRecord | null) {
+  if (!record || !record.FirstCheckIn) {
+    return 'Chưa chấm công'
+  }
+
+  if (!record.LastCheckOut) {
+    return 'Đã vào, chưa ra'
+  }
+
+  return 'Đã chấm công đủ'
 }
 
 function getMonthInputValue(date: Date) {
