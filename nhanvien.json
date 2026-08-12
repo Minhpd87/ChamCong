@@ -347,7 +347,7 @@
   {
     "ma_nv": "2071",
     "ten": "Phan Hải Linh",
-    "phong": "Phòng Đấu thầu, thẩm định và giám sát đầu tư"
+    "phong": "Quản lý Đầu tư ngoài ngân sách"
   },
   {
     "ma_nv": "2072",
@@ -712,7 +712,7 @@
   {
     "ma_nv": "2144",
     "ten": "Hồ Thị Yến Ngọc",
-    "phong": "Phòng Kinh tế đối ngoại"
+    "phong": "Quản lý Đầu tư ngoài ngân sách"
   },
   {
     "ma_nv": "2145",
@@ -870,11 +870,6 @@
     "phong": "Phòng Đăng ký kinh doanh và quản lý doanh nghiệp"
   },
   {
-    "ma_nv": "2176",
-    "ten": "Nguyễn Đức Lam",
-    "phong": "Quản lý đầu tư ngoài ngân sách"
-  },
-  {
     "ma_nv": "2177",
     "ten": "Nguyễn Hồng Hải",
     "phong": "Quản lý đầu tư ngoài ngân sách"
@@ -942,7 +937,7 @@
   {
     "ma_nv": "2190",
     "ten": "Hoàng Hà Đông",
-    "phong": "Quản lý đầu tư ngoài ngân sách"
+    "phong": "Phòng Tổng hợp, Quy hoạch"
   },
   {
     "ma_nv": "2191",
@@ -978,135 +973,5 @@
     "ma_nv": "2197",
     "ten": "Nguyễn Thị Hải Phương",
     "phong": "Quản lý đầu tư ngoài ngân sách"
-  },
-  {
-    "ma_nv": "2198",
-    "ten": "Trần Thị Hoài Thu",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2199",
-    "ten": "Lê Thị Thắm",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2200",
-    "ten": "Nguyễn Mạnh Duy",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2201",
-    "ten": "Nguyễn Mai Biển",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2202",
-    "ten": "Nguyễn Phạm Dương Tùng",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2203",
-    "ten": "Nguyễn Bảo Lan",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2204",
-    "ten": "Vũ Thị Thu",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2205",
-    "ten": "Nguyễn Mạnh Cường",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2206",
-    "ten": "Nguyễn Thị Trang",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2207",
-    "ten": "Trần Văn Huấn",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2208",
-    "ten": "Phan Thu Hà",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2209",
-    "ten": "Phạm Thị Thương",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2210",
-    "ten": "Bùi Minh Thương",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2211",
-    "ten": "Phạm Thị Thu Hà",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2212",
-    "ten": "Nguyễn Thùy Linh",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2213",
-    "ten": "Nguyễn Thu Trang",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2214",
-    "ten": "Vương Đình Khiêm",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2215",
-    "ten": "Đặng Thị Tố Quyên",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2216",
-    "ten": "Nghiêm Thị Hồng Vân",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2217",
-    "ten": "Nguyễn Tuấn Anh",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2218",
-    "ten": "Nguyễn Thị Trang",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2219",
-    "ten": "Trần Thanh Tùng",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2220",
-    "ten": "Nguyễn Thị Yến",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2221",
-    "ten": "Bùi Mỹ Duyên",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2222",
-    "ten": "Phạm Đình Phiên",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  },
-  {
-    "ma_nv": "2223",
-    "ten": "Nguyễn Phương Thảo",
-    "phong": "Trung tâm Tư vấn và Dịch vụ tài chính Hải Phòng"
-  }
+  },  
 ]
