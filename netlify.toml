@@ -1,0 +1,8 @@
+[build.environment]
+  NODE_TLS_REJECT_UNAUTHORIZED = "0"
+
+[[redirects]]
+  from = "/api-haiphong/*"
+  to = "/.netlify/functions/proxy"
+  status = 200
+  force = true
