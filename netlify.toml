@@ -3,6 +3,7 @@
 
 [[redirects]]
   from = "/api-haiphong/*"
-  to = "/.netlify/functions/proxy"
+  to = "https://chamcong.haiphong.gov.vn/:splat"
   status = 200
   force = true
+  headers = { Host = "chamcong.haiphong.gov.vn", Origin = "https://chamcong.haiphong.gov.vn", Referer = "https://chamcong.haiphong.gov.vn/", User-Agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
