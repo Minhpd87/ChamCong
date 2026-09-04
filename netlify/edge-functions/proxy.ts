@@ -1,33 +1,50 @@
 export default async (request: Request) => {
   const url = new URL(request.url)
   
-  // Trích xuất phần đuôi API và ghép vào URL của Hải Phòng
+  // 1. Tách phần path để ghép sang domain máy chủ chấm công
   const targetPath = url.pathname.replace(/^\/api-haiphong/, '')
-  const targetUrl = new URL(targetPath + url.search, 'https://chamcong.haiphong.gov.vn')
+  const targetUrl = `https://chamcong.haiphong.gov.vn${targetPath}${url.search}`
 
-  // Giả mạo hoàn toàn các header để đánh lừa tường lửa của chính phủ
+  // 2. Tùy chỉnh Headers giả mạo trình duyệt Chrome
   const modifiedHeaders = new Headers(request.headers)
+  modifiedHeaders.set('Host', 'chamcong.haiphong.gov.vn')
   modifiedHeaders.set('Origin', 'https://chamcong.haiphong.gov.vn')
   modifiedHeaders.set('Referer', 'https://chamcong.haiphong.gov.vn/')
   modifiedHeaders.set(
     'User-Agent',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
   )
-  modifiedHeaders.delete('X-Forwarded-Host')
-  modifiedHeaders.delete('X-Forwarded-For')
+  
+  // Xóa các headers gây lộ IP/Domain của Netlify
+  modifiedHeaders.delete('x-forwarded-host')
+  modifiedHeaders.delete('x-forwarded-for')
+  modifiedHeaders.delete('x-netlify-hostname')
 
   try {
-    // Gọi API đích bằng header đã giả mạo
-    const response = await fetch(targetUrl.toString(), {
+    // 3. Chuẩn bị options cho fetch (Xử lý an toàn cho request.body)
+    const fetchOptions: RequestInit = {
       method: request.method,
       headers: modifiedHeaders,
-      body: request.body
-    })
+    }
 
-    // Mở khóa CORS cho trình duyệt của bạn nhận data trả về
+    // Chỉ gửi body nếu không phải method GET hoặc HEAD
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      fetchOptions.body = request.body
+    }
+
+    // 4. Thực hiện request tới server Hải Phòng
+    const response = await fetch(targetUrl, fetchOptions)
+
+    // 5. Cấu hình Headers trả về để vượt qua CORS ở Browser
     const responseHeaders = new Headers(response.headers)
     responseHeaders.set('Access-Control-Allow-Origin', '*')
-    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    responseHeaders.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE')
+    responseHeaders.set('Access-Control-Allow-Headers', '*')
+
+    // Xử lý request Preflight (OPTIONS) từ trình duyệt
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: responseHeaders, status: 204 })
+    }
 
     return new Response(response.body, {
       status: response.status,
@@ -35,11 +52,20 @@ export default async (request: Request) => {
       headers: responseHeaders,
     })
   } catch (error) {
-    return new Response('Proxy Server Error', { status: 500 })
+    console.error('Proxy Execution Error:', error)
+    return new Response(
+      JSON.stringify({
+        error: 'Proxy Fetch Failed',
+        message: error instanceof Error ? error.message : String(error),
+      }),
+      {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    )
   }
 }
 
-// Cấu hình để Netlify tự động chạy function này khi gọi vào /api-haiphong/
 export const config = {
   path: "/api-haiphong/*"
 }
