@@ -56,9 +56,8 @@ type AttendanceLoaderData = {
 type ActivePanel = 'detail' | 'highRadius' | 'checkedInOut'
 
 const employeesUrl = new URL('../../nhanvien.json', import.meta.url).href
-const faceInfoUrl = 'https://chamcong.haiphong.gov.vn/api/LAY_FACEID'
-const attendanceUrl =
-  'https://chamcong.haiphong.gov.vn/api/mobile/attendance-history'
+const faceInfoUrl = '/api-haiphong/api/LAY_FACEID'
+const attendanceUrl = '/api-haiphong/api/mobile/attendance-history'
 
 const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
