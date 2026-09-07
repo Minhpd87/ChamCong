@@ -56,8 +56,13 @@ type AttendanceLoaderData = {
 type ActivePanel = 'detail' | 'highRadius' | 'checkedInOut'
 
 const employeesUrl = new URL('../../nhanvien.json', import.meta.url).href
-const faceInfoUrl = '/api-haiphong/api/LAY_FACEID'
-const attendanceUrl = '/api-haiphong/api/mobile/attendance-history'
+
+// Thay URL Cloudflare Worker của bạn vào đây:
+const PROXY_WORKER = 'https://proxy-haiphong.<ten-account-cua-ban>.workers.dev'
+
+const faceInfoUrl = `${PROXY_WORKER}/api/LAY_FACEID`
+const attendanceUrl = `${PROXY_WORKER}/api/mobile/attendance-history`
+
 
 const weekdayLabels = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7']
 
