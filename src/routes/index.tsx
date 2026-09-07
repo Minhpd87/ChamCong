@@ -59,8 +59,6 @@ const employeesUrl = new URL('../../nhanvien.json', import.meta.url).href
 
 // Thay URL Cloudflare Worker của bạn vào đây:
 const PROXY_WORKER = 'proxy-haiphong.minhpd-87.workers.dev'
-'
-
 const faceInfoUrl = `${PROXY_WORKER}/api/LAY_FACEID`
 const attendanceUrl = `${PROXY_WORKER}/api/mobile/attendance-history`
 
