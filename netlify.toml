@@ -1,0 +1,4 @@
+[[redirects]]
+  from = "/chamcong-proxy/*"
+  to = "/.netlify/functions/chamcong-relay/:splat"
+  status = 200
